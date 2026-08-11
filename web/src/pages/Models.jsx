@@ -1,4 +1,4 @@
-import { useEffect, useState, useRef } from 'react';
+import { useEffect, useState, useRef, useCallback } from 'react';
 import { api } from '../api';
 import { useStore } from '../store';
 
@@ -11,16 +11,28 @@ export default function Models() {
   const [error, setError] = useState('');
   const settings = useStore((s) => s.settings);
   const pollRef = useRef(null);
+  const retryTimerRef = useRef(null);
 
-  const load = async () => {
+  // 加载模型列表；失败时自动重试（Python 服务可能仍在启动）
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const data = await api('/models');
       setModels(data.models || []);
       setDiskUsage(data.disk_usage || 0);
-    } catch (e) { setError('本地推理服务未启动：' + e.message); }
-    finally { setLoading(false); }
-  };
+      setError('');
+      if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+    } catch (e) {
+      setError('本地推理服务未启动：' + e.message);
+      // 5 秒后自动重试
+      if (!retryTimerRef.current) {
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          load();
+        }, 5000);
+      }
+    } finally { setLoading(false); }
+  }, []);
 
   const pollStatus = async () => {
     try {
@@ -29,7 +41,7 @@ export default function Models() {
     } catch { /* 忽略 */ }
   };
 
-  useEffect(() => { load(); }, []);
+  useEffect(() => { load(); return () => { if (retryTimerRef.current) clearTimeout(retryTimerRef.current); }; }, [load]);
 
   // 有下载任务时轮询
   useEffect(() => {
@@ -57,7 +69,7 @@ export default function Models() {
       load();
       if (st.status === 'failed') setError(`下载失败: ${st.error || ''}`);
     }
-  }, [status, downloading]);
+  }, [status, downloading, load]);
 
   const download = async (id) => {
     setDownloading(id);
@@ -95,13 +107,30 @@ export default function Models() {
           <h1 className="text-3xl font-semibold tracking-tight">本地模型</h1>
           <p className="text-gray-400 dark:text-gray-500 mt-1">Whisper 多种尺寸 · Qwen3-ASR，本地推理不依赖云端</p>
         </div>
-        <span className="text-sm text-gray-400 dark:text-gray-500">占用 {formatBytes(diskUsage)}</span>
+        <div className="flex items-center gap-3">
+          <span className="text-sm text-gray-400 dark:text-gray-500">占用 {formatBytes(diskUsage)}</span>
+          <button className="btn-secondary !py-1.5 text-sm" onClick={load} disabled={loading}>刷新</button>
+        </div>
       </div>
 
-      {error && <div className="card p-4 mb-6 text-red-600 bg-red-50 border-red-100 dark:bg-red-950/30 dark:border-red-900">{error}</div>}
+      {error && (
+        <div className="card p-4 mb-6 text-red-600 bg-red-50 border-red-100 dark:bg-red-950/30 dark:border-red-900 flex items-center justify-between gap-3">
+          <div className="flex-1">
+            <p className="font-medium">本地推理服务不可用</p>
+            <p className="text-sm mt-0.5">{error}。正在自动重试…</p>
+          </div>
+          <button className="btn-secondary !py-1.5 text-sm shrink-0" onClick={load} disabled={loading}>立即重试</button>
+        </div>
+      )}
 
       {loading ? (
         <p className="text-center text-gray-400 py-16">加载模型列表…</p>
+      ) : models.length === 0 && !error ? (
+        <div className="card p-12 text-center text-gray-400">
+          <p className="text-4xl mb-3">📦</p>
+          <p>暂无可用模型</p>
+          <button className="btn-secondary mt-4" onClick={load}>重新加载</button>
+        </div>
       ) : (
         <div className="space-y-4">
           <h2 className="font-semibold text-lg">Whisper</h2>
