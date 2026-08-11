@@ -1,6 +1,14 @@
 /** @type {import('tailwindcss').Config} */
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
 export default {
-  content: ['./index.html', './src/**/*.{js,jsx}'],
+  content: [
+    path.resolve(__dirname, 'index.html'),
+    path.resolve(__dirname, 'src/**/*.{js,jsx}')
+  ],
   darkMode: 'class',
   theme: {
     extend: {
