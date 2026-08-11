@@ -1,0 +1,31 @@
+import path from 'node:path';
+import os from 'node:os';
+import { fileURLToPath } from 'node:url';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+
+export const ROOT = path.resolve(__dirname, '..');
+export const DATA_DIR = path.join(ROOT, 'data');
+export const MEETINGS_DIR = path.join(DATA_DIR, 'meetings');
+export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+export const TRASH_DIR = path.join(DATA_DIR, 'trash');
+export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+
+export const MODELS_DIR = path.join(os.homedir(), '.meeting', 'models');
+
+export const PYTHON_SERVE_URL = 'http://127.0.0.1:8300';
+
+export const PORT = process.env.PORT || 3000;
+
+export const DEFAULT_SETTINGS = {
+  llm: { baseUrl: '', apiKey: '', model: '', temperature: 0.3 },
+  asr: {
+    provider: 'qwen',
+    qwen: { apiKey: '', model: 'qwen-audio-3.0-asr-flash-filetrans' },
+    volc: { appid: '', token: '', cluster: 'volcengine_input_common' },
+    mimo: { apiKey: '', model: 'mimo-v2.5-asr' },
+    local: { engine: 'whisper', model: 'whisper-large-v3' }
+  },
+  correction: { enabled: true },
+  ui: { theme: 'light' }
+};

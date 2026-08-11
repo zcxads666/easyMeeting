@@ -1,0 +1,31 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  html { -webkit-font-smoothing: antialiased; }
+  body { @apply bg-apple-gray text-apple-dark font-sans; }
+}
+
+@layer components {
+  .card {
+    @apply bg-white rounded-2xl shadow-sm border border-black/5;
+  }
+  .btn {
+    @apply inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed;
+  }
+  .btn-primary { @apply btn bg-apple-blue text-white hover:bg-blue-600 active:scale-95; }
+  .btn-secondary { @apply btn bg-white border border-gray-200 text-apple-dark hover:bg-gray-50 active:scale-95; }
+  .input {
+    @apply w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm text-apple-dark focus:outline-none focus:ring-2 focus:ring-apple-blue/40 focus:border-apple-blue;
+  }
+  .label { @apply block text-sm font-medium text-gray-600 mb-1.5; }
+}
+
+/* 打字机光标 */
+@keyframes blink { 50% { opacity: 0; } }
+.cursor-blink::after {
+  content: '▋';
+  @apply text-apple-blue;
+  animation: blink 1s step-end infinite;
+}
