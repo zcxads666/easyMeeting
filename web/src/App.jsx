@@ -1,5 +1,5 @@
 import { useEffect } from 'react';
-import { Routes, Route, Link, NavLink, useLocation } from 'react-router-dom';
+import { Routes, Route, Link, NavLink } from 'react-router-dom';
 import { useStore } from './store';
 import Home from './pages/Home.jsx';
 import Meeting from './pages/Meeting.jsx';
@@ -39,11 +39,10 @@ export default function App() {
 }
 
 function Nav() {
-  const location = useLocation();
   return (
-    <nav className="sticky top-0 z-40 backdrop-blur-xl bg-white/70 border-b border-black/5">
+    <nav className="sticky top-0 z-40 backdrop-blur-xl bg-white/70 dark:bg-[#1c1c1e]/80 border-b border-black/5 dark:border-white/10">
       <div className="max-w-5xl mx-auto px-4 sm:px-8 h-12 flex items-center justify-between">
-        <Link to="/" className="flex items-center gap-2 font-semibold text-apple-dark">
+        <Link to="/" className="flex items-center gap-2 font-semibold text-apple-dark dark:text-[#f5f5f7]">
           <span className="w-6 h-6 rounded-full bg-apple-blue text-white text-xs flex items-center justify-center">会</span>
           <span>会议纪要</span>
         </Link>
@@ -54,7 +53,9 @@ function Nav() {
               to={n.to}
               className={({ isActive }) =>
                 `px-3 py-1.5 rounded-full text-sm transition-colors ${
-                  isActive ? 'bg-apple-blue/10 text-apple-blue' : 'text-gray-600 hover:bg-black/5'
+                  isActive
+                    ? 'bg-apple-blue/10 text-apple-blue'
+                    : 'text-gray-600 dark:text-gray-400 hover:bg-black/5 dark:hover:bg-white/10'
                 }`
               }
             >

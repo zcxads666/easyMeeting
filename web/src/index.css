@@ -5,21 +5,27 @@
 @layer base {
   html { -webkit-font-smoothing: antialiased; }
   body { @apply bg-apple-gray text-apple-dark font-sans; }
+  .dark body { @apply bg-[#000000] text-[#f5f5f7]; }
 }
 
 @layer components {
   .card {
     @apply bg-white rounded-2xl shadow-sm border border-black/5;
+    @apply dark:bg-[#1c1c1e] dark:border-white/10;
   }
   .btn {
     @apply inline-flex items-center justify-center rounded-full px-6 py-2.5 text-sm font-medium transition-all disabled:opacity-40 disabled:cursor-not-allowed;
   }
   .btn-primary { @apply btn bg-apple-blue text-white hover:bg-blue-600 active:scale-95; }
-  .btn-secondary { @apply btn bg-white border border-gray-200 text-apple-dark hover:bg-gray-50 active:scale-95; }
+  .btn-secondary {
+    @apply btn bg-white border border-gray-200 text-apple-dark hover:bg-gray-50 active:scale-95;
+    @apply dark:bg-[#2c2c2e] dark:border-white/10 dark:text-[#f5f5f7] dark:hover:bg-[#3a3a3c];
+  }
   .input {
     @apply w-full rounded-xl border border-gray-300 bg-white px-4 py-2.5 text-sm text-apple-dark focus:outline-none focus:ring-2 focus:ring-apple-blue/40 focus:border-apple-blue;
+    @apply dark:bg-[#1c1c1e] dark:border-white/10 dark:text-[#f5f5f7] dark:placeholder-gray-500;
   }
-  .label { @apply block text-sm font-medium text-gray-600 mb-1.5; }
+  .label { @apply block text-sm font-medium text-gray-600 mb-1.5 dark:text-gray-400; }
 }
 
 /* 打字机光标 */
@@ -29,3 +35,9 @@
   @apply text-apple-blue;
   animation: blink 1s step-end infinite;
 }
+
+/* 滚动条美化 */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { @apply bg-gray-300 dark:bg-white/20 rounded-full; }
+::-webkit-scrollbar-thumb:hover { @apply bg-gray-400 dark:bg-white/30; }

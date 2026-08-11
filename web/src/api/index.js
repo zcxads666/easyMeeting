@@ -13,7 +13,7 @@ export async function uploadMeeting(id, file, onProgress) {
   const form = new FormData();
   form.append('audio', file);
   const res = await fetch(`/api/meetings/${id}/transcribe`, { method: 'POST', body: form });
-  const data = await res.json();
+  const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.error || '上传失败');
   return data.taskId;
 }

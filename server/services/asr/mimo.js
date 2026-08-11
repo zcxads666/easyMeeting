@@ -22,6 +22,9 @@ async function chatCompletions(settings, { audioDataUri, stream = false }) {
 }
 
 export async function mimoFileTranscribe({ filePath, fileName }, settings) {
+  const { apiKey, model } = settings.asr.mimo;
+  if (!apiKey) throw new Error('未配置 MiMo API Key');
+  if (!model) throw new Error('未配置 MiMo 模型');
   const wavPath = await transcodeToWav(filePath, `mimo_${Date.now()}.wav`);
   const dataUri = await toBase64DataUri(wavPath, mimeFor('.wav'));
   const json = await chatCompletions(settings, { audioDataUri: dataUri });
@@ -58,7 +61,8 @@ export function mimoRealtime(settings) {
     if (!buffer.length) return;
     const pcm = Buffer.concat(buffer.splice(0, buffer.length));
     try {
-      const dataUri = `data:audio/pcm;base64,${pcm.toString('base64')}`;
+      const wav = pcmToWav(pcm);
+      const dataUri = `data:audio/wav;base64,${wav.toString('base64')}`;
       const json = await chatCompletions(settings, { audioDataUri: dataUri });
       const text = (json.choices?.[0]?.message?.content || '').trim();
       if (text) emit('final', { text });
@@ -71,4 +75,27 @@ export function mimoRealtime(settings) {
 function splitSegments(text) {
   return text.split(/[。！？!?\n]+/).map((s) => s.trim()).filter(Boolean)
     .map((t) => ({ start: 0, end: 0, text: t }));
+}
+
+// 将 16kHz 16bit mono PCM Buffer 转为 WAV Buffer
+function pcmToWav(pcm) {
+  const sampleRate = 16000;
+  const bitsPerSample = 16;
+  const numChannels = 1;
+  const dataLen = pcm.length;
+  const header = Buffer.alloc(44);
+  header.write('RIFF', 0);
+  header.writeUInt32LE(36 + dataLen, 4);
+  header.write('WAVE', 8);
+  header.write('fmt ', 12);
+  header.writeUInt32LE(16, 16);
+  header.writeUInt16LE(1, 20); // PCM
+  header.writeUInt16LE(numChannels, 22);
+  header.writeUInt32LE(sampleRate, 24);
+  header.writeUInt32LE(sampleRate * numChannels * bitsPerSample / 8, 28);
+  header.writeUInt16LE(numChannels * bitsPerSample / 8, 32);
+  header.writeUInt16LE(bitsPerSample, 34);
+  header.write('data', 36);
+  header.writeUInt32LE(dataLen, 40);
+  return Buffer.concat([header, pcm]);
 }

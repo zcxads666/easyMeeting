@@ -44,6 +44,11 @@ router.post('/summary/stream', async (req, res) => {
   const { text } = req.body || {};
   if (!text) return res.status(400).json({ error: '缺少 text' });
   const settings = await getSettings();
+  // 在发送流式响应前校验 LLM 配置
+  const { baseUrl, apiKey, model } = settings.llm;
+  if (!baseUrl || !apiKey || !model) {
+    return res.status(400).json({ error: '未配置 LLM（baseUrl / apiKey / model），请前往设置页配置' });
+  }
   res.setHeader('Content-Type', 'text/plain; charset=utf-8');
   try {
     for await (const chunk of chatStream(settings, [
@@ -60,12 +65,17 @@ router.post('/summary/stream', async (req, res) => {
 
 router.post('/speaker', async (req, res) => {
   const { text } = req.body || {};
+  if (!text) return res.status(400).json({ error: '缺少 text' });
   const settings = await getSettings();
-  const result = await chat(settings, [
-    { role: 'system', content: SPEAKER_SYSTEM },
-    { role: 'user', content: speakerUser(text) }
-  ]);
-  res.json({ speaker: result });
+  try {
+    const result = await chat(settings, [
+      { role: 'system', content: SPEAKER_SYSTEM },
+      { role: 'user', content: speakerUser(text) }
+    ]);
+    res.json({ speaker: result });
+  } catch (e) {
+    res.status(400).json({ error: e.message });
+  }
 });
 
 export default router;

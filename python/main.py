@@ -1,6 +1,7 @@
 import json
 import base64
-import tempfile
+import threading
+import time
 import os
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
@@ -30,6 +31,11 @@ class SwitchReq(BaseModel):
     id: str
 
 
+# 后台下载状态追踪
+_download_status = {}  # id -> {status, progress, error, started}
+_download_lock = threading.Lock()
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "models_dir": str(model_manager.MODELS_DIR)}
@@ -40,13 +46,36 @@ def list_models():
     return {"models": model_manager.list_models(), "disk_usage": model_manager.disk_usage()}
 
 
+@app.get("/models/download/status")
+def download_status():
+    with _download_lock:
+        return {"downloads": dict(_download_status)}
+
+
+def _do_download(model_id: str):
+    try:
+        with _download_lock:
+            _download_status[model_id] = {"status": "downloading", "progress": 0, "started": time.time()}
+        model_manager.download(model_id)
+        with _download_lock:
+            _download_status[model_id] = {"status": "completed", "progress": 100}
+    except Exception as e:
+        with _download_lock:
+            _download_status[model_id] = {"status": "failed", "error": str(e)}
+
+
 @app.post("/models/download")
 async def download(req: DownloadReq):
-    try:
-        path = model_manager.download(req.id)
-        return {"ok": True, "id": req.id, "path": str(path)}
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=f"下载失败: {e}")
+    with _download_lock:
+        existing = _download_status.get(req.id)
+        if existing and existing.get("status") == "downloading":
+            return {"ok": True, "id": req.id, "status": "already_downloading"}
+    # 在后台线程中执行下载
+    t = threading.Thread(target=_do_download, args=(req.id,), daemon=True)
+    t.start()
+    with _download_lock:
+        _download_status[req.id] = {"status": "downloading", "progress": 0, "started": time.time()}
+    return {"ok": True, "id": req.id, "status": "downloading"}
 
 
 @app.post("/models/switch")

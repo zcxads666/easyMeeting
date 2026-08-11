@@ -7,7 +7,17 @@ from transformers import pipeline
 _cache = {}
 
 
+def _require_torch():
+    try:
+        import torch  # noqa: F401
+    except ImportError:
+        raise RuntimeError(
+            "Qwen3-ASR 需要 PyTorch。请运行: python/.venv/bin/pip install torch"
+        )
+
+
 def _get_pipeline(model_id):
+    _require_torch()
     if model_id in _cache:
         return _cache[model_id]
     # Qwen3-ASR 通常通过 AutoModelForCausalLM + processor 使用；

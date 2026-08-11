@@ -5,7 +5,10 @@ import { fileURLToPath } from 'node:url';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
 export const ROOT = path.resolve(__dirname, '..');
-export const DATA_DIR = path.join(ROOT, 'data');
+// 支持环境变量覆盖数据目录（测试隔离用）
+export const DATA_DIR = process.env.MEETING_DATA_DIR
+  ? path.resolve(process.env.MEETING_DATA_DIR)
+  : path.join(ROOT, 'data');
 export const MEETINGS_DIR = path.join(DATA_DIR, 'meetings');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 export const TRASH_DIR = path.join(DATA_DIR, 'trash');

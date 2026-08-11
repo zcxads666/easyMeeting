@@ -113,6 +113,9 @@ export async function volcFileTranscribe({ filePath }, settings) {
 }
 
 function normalize(text) {
+  if (typeof text !== 'string') {
+    return { segments: [], text: String(text?.message || text || '') };
+  }
   // 尝试解析 JSON 帧
   const jsonMatches = text.match(/\{.*\}/g);
   if (jsonMatches) {
@@ -134,6 +137,7 @@ function normalize(text) {
 /* ---- 实时：WS 二进制流 ---- */
 export function volcRealtime(settings) {
   const { appid, token, cluster } = settings.asr.volc;
+  if (!appid || !token) throw new Error('未配置火山 appid/token');
   let ws = null, accessToken = '';
   const emitMap = new Map();
   const emit = (n, d) => (emitMap.get(n) || []).forEach((fn) => fn(d));
@@ -141,6 +145,7 @@ export function volcRealtime(settings) {
   return {
     on(evt, fn) { emitMap.set(evt, [...(emitMap.get(evt) || []), fn]); },
     async start() {
+      try {
       accessToken = await getAppToken(appid, token);
       const { default: WebSocket } = await import('ws');
       ws = new WebSocket(WS_URL, { headers: { Authorization: `Bearer; ${accessToken}` } });
@@ -161,6 +166,7 @@ export function volcRealtime(settings) {
       });
       ws.on('error', (e) => emit('error', e));
       ws.on('close', () => emit('close', {}));
+      } catch (e) { emit('error', e); }
     },
     send(chunk) {
       if (ws && ws.readyState === 1) {

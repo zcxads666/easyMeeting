@@ -50,5 +50,19 @@ export function mimeFor(fileName) {
     '.opus': 'audio/ogg', '.flac': 'audio/flac', '.aac': 'audio/aac',
     '.m4a': 'audio/mp4', '.webm': 'audio/webm'
   };
-  return map[path.extname(fileName).toLowerCase()] || 'audio/wav';
+  return map[path.extname(fileName).toLowerCase()] || 'application/octet-stream';
+}
+/* ---------- 依赖检测 ---------- */
+
+let _ffmpegOk = null;
+
+export async function checkFFmpeg() {
+  if (_ffmpegOk !== null) return _ffmpegOk;
+  try {
+    await execFileAsync('ffmpeg', ['-version']);
+    _ffmpegOk = true;
+  } catch {
+    _ffmpegOk = false;
+  }
+  return _ffmpegOk;
 }

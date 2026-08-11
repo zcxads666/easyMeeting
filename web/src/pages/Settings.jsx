@@ -95,6 +95,7 @@ export default function Settings() {
           <div className="space-y-4 mt-4">
             <Field label="App ID"><input className="input" value={form.asr.volc.appid} onChange={(e) => set('asr', 'volc', { ...form.asr.volc, appid: e.target.value })} /></Field>
             <Field label="Access Token"><input className="input" type="password" value={form.asr.volc.token} onChange={(e) => set('asr', 'volc', { ...form.asr.volc, token: e.target.value })} /></Field>
+            <Field label="Cluster" hint="默认 volcengine_input_common"><input className="input" value={form.asr.volc.cluster} onChange={(e) => set('asr', 'volc', { ...form.asr.volc, cluster: e.target.value })} /></Field>
           </div>
         )}
         {form.asr.provider === 'mimo' && (

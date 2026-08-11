@@ -9,7 +9,10 @@
     "dev:web": "vite --config web/vite.config.js",
     "build": "vite build --config web/vite.config.js",
     "start": "node server/index.js",
-    "postinstall": "python3 -m pip install -r python/requirements.txt"
+    "postinstall": "echo '[meeting] run: npm run setup:python to install Python deps'",
+    "setup:python": "python3 -m venv python/.venv && python/.venv/bin/pip install --upgrade pip && python/.venv/bin/pip install -r python/requirements.txt",
+    "test": "node --test \"tests/unit/*.test.js\" \"tests/system/*.test.js\"",
+    "dist": "node scripts/build-release.mjs"
   },
   "dependencies": {
     "concurrently": "^9.0.0",

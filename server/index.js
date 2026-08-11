@@ -11,7 +11,8 @@ import settingsRoute from './routes/settings.js';
 import modelsRoute from './routes/models.js';
 import llmRoute from './routes/llm.js';
 import { setupRealtime } from './socket/realtime.js';
-import { spawnPython } from './services/python.js';
+import { spawnPython, isHealthy } from './services/python.js';
+import { checkFFmpeg } from './services/audio/ffmpeg.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
@@ -29,6 +30,15 @@ app.use('/uploads', express.static(UPLOADS_DIR));
 
 // 前端静态资源
 const dist = path.join(ROOT, 'web', 'dist');
+app.use(express.static(dist));
+// 健康检查：报告 ffmpeg 与 python 依赖状态
+app.get('/api/health', async (_req, res) => {
+  res.json({
+    ffmpeg: await checkFFmpeg(),
+    python: await isHealthy()
+  });
+});
+
 app.get('*', (req, res) => {
   if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'not found' });
   res.sendFile(path.join(dist, 'index.html'), (err) => {
@@ -45,15 +55,32 @@ queue.events.on('result', ({ taskId, ok, meetingId, error }) => {
   io.emit('task:done', { taskId, ok, meetingId, error });
 });
 
+// 立即启动 web 服务，Python 后台异步拉起，不阻塞
 async function main() {
-  await spawnPython();
+  // 检查 ffmpeg
+  const ffmpegOk = await checkFFmpeg();
+  if (!ffmpegOk) console.warn('[meeting] 警告: 未检测到 FFmpeg，文件转写将不可用。请安装 ffmpeg。');
+
   server.listen(PORT, () => {
     console.log(`[meeting] server running at http://localhost:${PORT}`);
+  });
+
+  // 后台拉起 Python 推理服务（不阻塞，失败仅警告）
+  spawnPython().then((ok) => {
+    if (!ok) console.warn('[meeting] Python 推理服务未就绪，本地模型功能不可用。请运行 npm run setup:python');
+  }).catch((e) => {
+    console.warn('[meeting] Python 推理服务启动失败:', e.message);
   });
 }
 
 main().catch((e) => {
   console.error('启动失败:', e);
-  // 即使 Python 失败也启动 web
   server.listen(PORT, () => console.log(`[meeting] server running at http://localhost:${PORT}`));
+});
+// 全局错误兜底：防止未捕获的异常导致进程崩溃
+process.on('uncaughtException', (err) => {
+  console.error('[meeting] uncaughtException:', err.message);
+});
+process.on('unhandledRejection', (reason) => {
+  console.error('[meeting] unhandledRejection:', reason?.message || reason);
 });

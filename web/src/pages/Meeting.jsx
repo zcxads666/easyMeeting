@@ -11,6 +11,8 @@ export default function Meeting() {
   const [partial, setPartial] = useState('');
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
+  const [progress, setProgress] = useState(0);
+  const [copiedIdx, setCopiedIdx] = useState(-1);
   const mediaRef = useRef(null);
   const audioCtxRef = useRef(null);
   const workletRef = useRef(null);
@@ -19,26 +21,30 @@ export default function Meeting() {
   useEffect(() => {
     connectSocket();
     api(`/meetings/${id}`).then(setMeeting).catch(() => setError('加载会议失败'));
-    return () => {
-      socket.off('rt:partial');
-      socket.off('rt:final');
-      socket.off('rt:status');
-      socket.off('rt:error');
-    };
-  }, [id]);
 
-  useEffect(() => {
-    socket.on('rt:partial', ({ text }) => setPartial(text));
-    socket.on('rt:final', ({ text, segments }) => {
+    const onPartial = ({ text }) => setPartial(text);
+    const onFinal = ({ text, segments }) => {
       setPartial('');
       segmentsRef.current = segments;
       setMeeting((m) => (m ? { ...m, segments, rawText: segments.map((s) => s.text).join('\n') } : m));
-    });
-    socket.on('rt:status', ({ state }) => {
+    };
+    const onStatus = ({ state }) => {
       if (state === 'stopped') setRecording(false);
-    });
-    socket.on('rt:error', ({ error }) => setError(error));
-  }, []);
+    };
+    const onError = ({ error }) => setError(error);
+
+    socket.on('rt:partial', onPartial);
+    socket.on('rt:final', onFinal);
+    socket.on('rt:status', onStatus);
+    socket.on('rt:error', onError);
+
+    return () => {
+      socket.off('rt:partial', onPartial);
+      socket.off('rt:final', onFinal);
+      socket.off('rt:status', onStatus);
+      socket.off('rt:error', onError);
+    };
+  }, [id]);
 
   const toggleRecording = async () => {
     if (recording) {
@@ -64,7 +70,7 @@ export default function Meeting() {
       node.port.onmessage = (e) => {
         // e.data 为 Float32Array，转 16kHz->16bit PCM base64
         const pcm = float32ToPcm16(e.data);
-        socket.emit('rt:audio', { meetingId: id, data: pcm.toString('base64') });
+        socket.emit('rt:audio', { meetingId: id, data: uint8ToBase64(pcm) });
       };
       source.connect(node);
       workletRef.current = node;
@@ -90,19 +96,29 @@ export default function Meeting() {
     const file = files[0];
     if (!file) return;
     setUploading(true);
+    setProgress(0);
     setError('');
     try {
       const taskId = await uploadMeeting(id, file);
-      socket.once('task:done', function handler({ taskId: tid, ok, error: err }) {
+      const onProgress = ({ taskId: tid, percent, stage }) => {
         if (tid !== taskId) return;
-        socket.off('task:done', handler);
+        setProgress(percent || 0);
+      };
+      const onDone = ({ taskId: tid, ok, error: err }) => {
+        if (tid !== taskId) return;
+        socket.off('task:progress', onProgress);
+        socket.off('task:done', onDone);
         if (ok) {
+          setProgress(100);
           api(`/meetings/${id}`).then(setMeeting).catch(() => {});
         } else {
           setError(err || '转写失败');
         }
         setUploading(false);
-      });
+        setTimeout(() => setProgress(0), 1500);
+      };
+      socket.on('task:progress', onProgress);
+      socket.on('task:done', onDone);
     } catch (e) {
       setError(e.message);
       setUploading(false);
@@ -131,8 +147,8 @@ export default function Meeting() {
         <button className={recording ? 'btn bg-red-500 text-white hover:bg-red-600' : 'btn-primary'} onClick={toggleRecording}>
           {recording ? '■ 停止' : '● 开始录音'}
         </button>
-        <label className="btn-secondary cursor-pointer">
-          {uploading ? '转写中…' : '上传录音文件'}
+        <label className="btn-secondary cursor-pointer relative overflow-hidden">
+          {uploading ? `转写中 ${progress}%` : '上传录音文件'}
           <input type="file" accept=".mp3,.wav,.ogg,.webm,.flac,.aac,.m4a,.amr,.opus,.mp4,.mkv,.mov,audio/*" className="hidden" onChange={(e) => onUpload(e.target.files)} disabled={uploading} />
         </label>
         {meeting.rawText && (
@@ -159,9 +175,19 @@ export default function Meeting() {
         {meeting.segments?.length ? (
           <div className="space-y-3">
             {meeting.segments.map((s, i) => (
-              <div key={i} className="flex gap-3">
-                {s.speaker && <span className="text-xs px-2 py-0.5 h-fit rounded-full bg-blue-100 text-blue-600 shrink-0">{s.speaker}</span>}
-                <p className="text-gray-700 leading-relaxed">{s.text}</p>
+              <div
+                key={i}
+                className="flex gap-3 group cursor-pointer rounded-lg px-2 py-1 -mx-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                onClick={() => {
+                  navigator.clipboard.writeText(s.text || '');
+                  setCopiedIdx(i);
+                  setTimeout(() => setCopiedIdx(-1), 1500);
+                }}
+                title="点击复制此句"
+              >
+                {s.speaker && <span className="text-xs px-2 py-0.5 h-fit rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{s.speaker}</span>}
+                <p className="text-gray-700 dark:text-gray-300 leading-relaxed flex-1">{s.text}</p>
+                {copiedIdx === i && <span className="text-xs text-green-500 self-center shrink-0">已复制</span>}
               </div>
             ))}
           </div>
@@ -181,4 +207,14 @@ function float32ToPcm16(float32) {
     view.setInt16(i * 2, s < 0 ? s * 0x8000 : s * 0x7fff, true);
   }
   return new Uint8Array(buffer);
+}
+
+function uint8ToBase64(uint8) {
+  let binary = '';
+  const chunkSize = 8192;
+  for (let i = 0; i < uint8.length; i += chunkSize) {
+    const chunk = uint8.subarray(i, i + chunkSize);
+    binary += String.fromCharCode.apply(null, chunk);
+  }
+  return btoa(binary);
 }

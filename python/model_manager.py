@@ -57,23 +57,38 @@ def exists(d):
     return d.is_dir() and any(d.iterdir())
 
 
+def _require(pkg, hint):
+    try:
+        __import__(pkg)
+    except ImportError:
+        raise RuntimeError(
+            f"缺少依赖 {pkg}。{hint}"
+        )
+
+
 def download_whisper(size, progress_cb=None):
     ensure_dir()
     dest = _whisper_local_dir(size)
-    # 优先 modelscope，失败回退 huggingface
-    from huggingface_hub import snapshot_download
-    repo = f"Systran/faster-whisper-{size}"
-    snapshot_download(
-        repo_id=repo,
-        local_dir=str(dest),
-        local_dir_use_symlinks=False,
-    )
+    if DEFAULT_SOURCE == "modelscope":
+        # modelscope 对国内更快
+        _require("modelscope", "请运行: python/.venv/bin/pip install modelscope")
+        from modelscope import snapshot_download as ms_download
+        ms_download(f"Systran/faster-whisper-{size}", local_dir=str(dest))
+    else:
+        _require("huggingface_hub", "请运行: python/.venv/bin/pip install huggingface_hub")
+        from huggingface_hub import snapshot_download
+        snapshot_download(
+            repo_id=f"Systran/faster-whisper-{size}",
+            local_dir=str(dest),
+            local_dir_use_symlinks=False,
+        )
     return dest
 
 
 def download_qwen(model_id, progress_cb=None):
     ensure_dir()
     dest = _qwen_local_dir(model_id)
+    _require("modelscope", "请运行: python/.venv/bin/pip install modelscope")
     from modelscope import snapshot_download as ms_download
     ms_download(model_id, local_dir=str(dest))
     return dest

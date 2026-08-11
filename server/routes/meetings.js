@@ -84,12 +84,14 @@ router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
 
   (async () => {
     try {
+      queue.progress(taskId, { stage: 'probing', percent: 5 });
       const info = await probe(req.file.path);
-      queue.progress(taskId, { stage: 'transcoding', percent: 5 });
+      queue.progress(taskId, { stage: 'transcoding', percent: 15 });
       const result = await transcribeFile(settings.asr.provider, {
         filePath: req.file.path,
         fileName: req.file.originalname
       }, settings);
+      queue.progress(taskId, { stage: 'saving', percent: 90 });
       queue.progress(taskId, { stage: 'done', percent: 100 });
       meeting.source = 'file';
       meeting.audioRef = req.file.path;

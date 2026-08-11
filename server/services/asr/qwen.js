@@ -77,17 +77,17 @@ export function qwenRealtime(settings) {
   const { apiKey, model } = settings.asr.qwen;
   if (!apiKey) throw new Error('未配置千问 API Key');
   const url = 'wss://dashscope.aliyuncs.com/api-ws/v1/inference';
-  const callbacks = { onFinal: null, onPartial: null, onError: null, onOpen: null };
   let ws = null;
   let taskStarted = false;
   const taskId = cryptoRandom();
 
-  const listeners = new Set();
-  const emit = (name, data) => listeners.forEach((fn) => fn(data));
+  const emitMap = new Map();
+  const emit = (name, data) => (emitMap.get(name) || []).forEach((fn) => fn(data));
 
   return {
-    on(evt, fn) { listeners.add(fn); },
+    on(evt, fn) { emitMap.set(evt, [...(emitMap.get(evt) || []), fn]); },
     async start() {
+      try {
       const { default: WebSocket } = await import('ws');
       ws = new WebSocket(url, { headers: { Authorization: `Bearer ${apiKey}` } });
       ws.on('open', () => {
@@ -110,10 +110,11 @@ export function qwenRealtime(settings) {
         else if (event === 'task-failed') emit('error', new Error(msg.header?.error_message || '千问任务失败'));
       });
       ws.on('error', (e) => emit('error', e));
+      } catch (e) { emit('error', e); }
     },
     send(chunk) {
       if (ws && ws.readyState === 1) {
-        ws.send(chunk.buffer ?? chunk, { binary: true });
+        ws.send(Buffer.from(chunk));
       }
     },
     async stop() {

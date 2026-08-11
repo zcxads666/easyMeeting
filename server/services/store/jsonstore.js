@@ -44,7 +44,10 @@ export async function listMeetings() {
   );
   return meetings
     .filter(Boolean)
-    .sort((a, b) => (b.updatedAt || 0) - (a.updatedAt || 0));
+    .sort((a, b) => {
+      if ((a.pinned ? 1 : 0) !== (b.pinned ? 1 : 0)) return a.pinned ? -1 : 1;
+      return (b.updatedAt || 0) - (a.updatedAt || 0);
+    });
 }
 
 export async function getMeeting(id) {
