@@ -1,11 +1,27 @@
+# 依赖与构建
 node_modules/
 web/dist/
 python/.venv/
+release/
+coverage/
+
+# 运行产物（会议记录、上传音频、转写数据，一律本地保存）
 data/
+
+# Python 缓存
 __pycache__/
 *.pyc
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# 日志
+*.log
+npm-debug.log*
+logs/
+
+# 系统文件
 .DS_Store
-release/
 
 # AI 助手配置（本地生效，不入库）
 AGENTS.md
@@ -14,7 +30,19 @@ CLAUDE.md
 .agents/
 .cursorrules
 
-# 环境与密钥
+# 环境与密钥（绝不入库）
 .env
 .env.*
 !.env.example
+*.pem
+*.key
+*.p12
+*.cer
+*.secret
+
+# 本地覆盖配置（含 Key 的本地配置）
+*.local.json
+*.local.yaml
+*.local.yml
+*.local.toml
+config.local.*
