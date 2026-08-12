@@ -147,16 +147,18 @@ test('验收2: 设置读写 + provider 切换持久化', async () => {
   await api('PATCH', '/api/settings', { asr: { provider: 'qwen' } });
 });
 
-test('验收3: 模型代理路由（Python 未启动时优雅 502）', async () => {
-  // 若 Python 已就绪则跳真实测试；否则验证代理路径可达
+test('验收3: 模型代理路由（Python 未启动时优雅 502，启动后正常代理）', async () => {
+  // 路由可达、不崩溃即可：Python 未启动返回 502；
+  // 已启动时按真实模型状态返回 200（成功）/ 400（未安装/不存在）
+  const ACCEPT = [200, 400, 502];
   const { res } = await api('GET', '/api/models');
-  assert.ok(res.status === 200 || res.status === 502, `models 状态 ${res.status}`);
+  assert.ok(ACCEPT.includes(res.status), `models 状态 ${res.status}`);
   const { res: r2 } = await api('POST', '/api/models/download', { id: 'whisper-tiny' });
-  assert.ok(r2.status === 200 || r2.status === 502);
+  assert.ok(ACCEPT.includes(r2.status), `download 状态 ${r2.status}`);
   const { res: r3 } = await api('POST', '/api/models/switch', { id: 'whisper-tiny' });
-  assert.ok(r3.status === 200 || r3.status === 502);
+  assert.ok(ACCEPT.includes(r3.status), `switch 状态 ${r3.status}`);
   const { res: r4 } = await api('DELETE', '/api/models/whisper-tiny');
-  assert.ok(r4.status === 200 || r4.status === 502);
+  assert.ok(ACCEPT.includes(r4.status), `delete 状态 ${r4.status}`);
 });
 
 test('验收4a: LLM 未配置时全部端点返回 400 不崩溃', async () => {

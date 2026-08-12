@@ -52,19 +52,11 @@ export default function Models() {
 
   useEffect(() => { load(); return () => { if (retryTimerRef.current) clearTimeout(retryTimerRef.current); }; }, [load]);
 
-  // 有下载任务时轮询
+  // 有下载任务时轮询：只刷状态，下载完成后再刷新列表（避免下载期间频繁计算占用）
   useEffect(() => {
     if (downloading) {
       pollStatus();
-      pollRef.current = setInterval(async () => {
-        await pollStatus();
-        // 刷新模型列表以反映安装状态
-        const data = await api('/models').catch(() => null);
-        if (data) {
-          setModels(data.models || []);
-          setDiskUsage(data.disk_usage || 0);
-        }
-      }, 2000);
+      pollRef.current = setInterval(() => { pollStatus(); }, 2000);
       return () => clearInterval(pollRef.current);
     }
   }, [downloading]);
@@ -158,7 +150,7 @@ export default function Models() {
 }
 
 function ModelRow({ m, current, downloading, status, onDownload, onDelete, onSwitch }) {
-  const isCurrent = current === m.id;
+  const isCurrent = current === m.id && m.installed;
   const isDownloading = downloading === m.id;
   const dlStatus = status?.status;
 

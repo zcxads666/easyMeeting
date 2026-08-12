@@ -2,6 +2,7 @@ import os
 import glob
 import json
 import shutil
+import subprocess
 from pathlib import Path
 
 MODELS_DIR = Path(os.environ.get("MEETING_MODELS_DIR", Path.home() / ".meeting" / "models"))
@@ -24,8 +25,12 @@ REFERENCE_SIZES_GB = {
 }
 
 
-def dir_size_bytes(d):
-    """统计目录内所有文件大小（含子目录）"""
+# 目录占用缓存：key=目录绝对路径，value=(目录 mtime_ns, size_bytes)
+# 目录 mtime 在文件/子目录增删时变化（下载/删除模型会触发），缓存自动失效
+_size_cache = {}
+
+
+def _walk_size(d):
     total = 0
     for f in Path(d).rglob("*"):
         if f.is_file():
@@ -34,6 +39,34 @@ def dir_size_bytes(d):
             except OSError:
                 pass
     return total
+
+
+def _du_size(d):
+    """系统 du 快速统计（macOS/Linux，比 Python 遍历快数十倍）；失败回退遍历"""
+    try:
+        out = subprocess.run(
+            ["du", "-sk", str(d)], capture_output=True, text=True, timeout=30
+        ).stdout
+        kb = int(out.split()[0])
+        return kb * 1024
+    except Exception:
+        return _walk_size(d)
+
+
+def dir_size_bytes(d):
+    """统计目录占用（带缓存）：目录 mtime 未变化时直接返回缓存值"""
+    d = Path(d)
+    try:
+        mtime = d.stat().st_mtime_ns
+    except OSError:
+        return 0
+    key = str(d)
+    cached = _size_cache.get(key)
+    if cached and cached[0] == mtime:
+        return cached[1]
+    size = _du_size(d) if os.name != "nt" else _walk_size(d)
+    _size_cache[key] = (mtime, size)
+    return size
 
 
 def ensure_dir():
@@ -73,8 +106,13 @@ def list_models():
 
 
 def exists(d):
-    # 目录存在且非空
-    return d.is_dir() and any(d.iterdir())
+    """目录存在且包含实际文件（忽略下载中断残留的空目录/临时目录，如 ._____temp）"""
+    if not d.is_dir():
+        return False
+    for f in d.rglob("*"):
+        if f.is_file():
+            return True
+    return False
 
 
 def _require(pkg, hint):
