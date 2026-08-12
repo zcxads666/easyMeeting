@@ -1,5 +1,6 @@
 import { Router, json } from 'express';
 import multer from 'multer';
+import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
@@ -13,9 +14,15 @@ import { UPLOADS_DIR } from '../config.js';
 
 const router = Router();
 
+// 惰性目录：multer 的 diskStorage 构造时会立即 mkdir，
+// 若在模块加载阶段执行可能拿到错误的 DATA_DIR（如只读的 app.asar 路径），
+// 因此改用函数形式，仅在真正上传时创建目录。
 const upload = multer({
   storage: multer.diskStorage({
-    destination: UPLOADS_DIR,
+    destination: (_req, _file, cb) => {
+      fs.mkdirSync(UPLOADS_DIR, { recursive: true });
+      cb(null, UPLOADS_DIR);
+    },
     filename: (_req, file, cb) => cb(null, `${Date.now()}_${randomUUID()}${path.extname(file.originalname)}`)
   })
 });

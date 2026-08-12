@@ -3,6 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { socket } from '../socket';
 import { api, uploadMeeting } from '../api';
 import { connectSocket } from '../socket';
+import { BASE_URL } from '../env';
 
 export default function Meeting() {
   const { id } = useParams();
@@ -61,7 +62,7 @@ export default function Meeting() {
       mediaRef.current = stream;
       const ctx = new AudioContext({ sampleRate: 16000 });
       audioCtxRef.current = ctx;
-      await ctx.audioWorklet.addModule('/audio-worklet.js');
+      await ctx.audioWorklet.addModule(`${BASE_URL}/audio-worklet.js`);
       const source = ctx.createMediaStreamSource(stream);
       const node = new AudioWorkletNode(ctx, 'pcm-processor', {
         numberOfOutputs: 0,

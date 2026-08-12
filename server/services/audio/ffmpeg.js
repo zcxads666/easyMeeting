@@ -6,6 +6,10 @@ import { UPLOADS_DIR } from '../../config.js';
 
 const execFileAsync = promisify(execFile);
 
+// 支持环境变量覆盖 ffmpeg/ffprobe 路径（发布时指向内置二进制，如 ffmpeg-static）
+export const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
+export const FFPROBE_BIN = process.env.FFPROBE_PATH || 'ffprobe';
+
 export const SUPPORTED_EXT = [
   '.mp3', '.wav', '.ogg', '.webm', '.flac', '.aac', '.m4a', '.amr', '.opus', '.mp4', '.mkv', '.mov'
 ];
@@ -15,13 +19,13 @@ export function isSupported(fileName) {
 }
 
 export async function probe(filePath) {
-  const { stdout } = await execFileAsync('ffprobe', ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath]);
+  const { stdout } = await execFileAsync(FFPROBE_BIN, ['-v', 'quiet', '-print_format', 'json', '-show_format', '-show_streams', filePath]);
   return JSON.parse(stdout);
 }
 
 export async function transcodeToPcm(filePath, outName) {
   const out = path.join(UPLOADS_DIR, outName);
-  await execFileAsync('ffmpeg', [
+  await execFileAsync(FFMPEG_BIN, [
     '-y', '-i', filePath,
     '-ar', '16000', '-ac', '1', '-acodec', 'pcm_s16le',
     '-f', 's16le', out
@@ -31,7 +35,7 @@ export async function transcodeToPcm(filePath, outName) {
 
 export async function transcodeToWav(filePath, outName) {
   const out = path.join(UPLOADS_DIR, outName);
-  await execFileAsync('ffmpeg', [
+  await execFileAsync(FFMPEG_BIN, [
     '-y', '-i', filePath,
     '-ar', '16000', '-ac', '1', '-acodec', 'pcm_s16le',
     out
@@ -59,7 +63,7 @@ let _ffmpegOk = null;
 export async function checkFFmpeg() {
   if (_ffmpegOk !== null) return _ffmpegOk;
   try {
-    await execFileAsync('ffmpeg', ['-version']);
+    await execFileAsync(FFMPEG_BIN, ['-version']);
     _ffmpegOk = true;
   } catch {
     _ffmpegOk = false;

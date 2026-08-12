@@ -1,6 +1,7 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { access, readFile } from 'node:fs/promises';
+import { accessSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
 import { ROOT, PYTHON_SERVE_URL } from '../config.js';
@@ -12,7 +13,19 @@ let restartTimer = null;
 let shouldRun = false; // 是否应保持运行（用户未主动停止）
 let consecutiveRestarts = 0;
 
-const PY_DIR = path.join(ROOT, 'python');
+// Electron 打包后 python 目录在 app.asar.unpacked（spawn 子进程需要真实文件路径）
+function resolvePythonDir() {
+  const candidates = [
+    path.join(ROOT, 'python'),
+    path.join(`${ROOT}.unpacked`, 'python')
+  ];
+  for (const p of candidates) {
+    try { accessSync(p); return p; } catch { /* 继续尝试 */ }
+  }
+  return candidates[0];
+}
+
+const PY_DIR = resolvePythonDir();
 const VENV_DIR = path.join(PY_DIR, '.venv');
 // Windows 与 POSIX 的 venv 内 python 路径不同
 const VENV_PYTHON = os.platform() === 'win32'

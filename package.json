@@ -12,7 +12,10 @@
     "postinstall": "echo '[meeting] run: npm run setup:python to install Python deps'",
     "setup:python": "python3 -m venv python/.venv && python/.venv/bin/pip install --upgrade pip && python/.venv/bin/pip install -r python/requirements.txt",
     "test": "node --test \"tests/unit/*.test.js\" \"tests/system/*.test.js\"",
-    "dist": "node scripts/build-release.mjs"
+    "dist": "node scripts/build-release.mjs",
+    "desktop": "electron .",
+    "desktop:dev": "concurrently -k -n web,electron \"npm:dev:web\" \"electron . --dev\"",
+    "desktop:dist": "electron-builder"
   },
   "dependencies": {
     "concurrently": "^9.0.0",
@@ -30,8 +33,46 @@
   "devDependencies": {
     "@vitejs/plugin-react": "^6.0.5",
     "autoprefixer": "^10.4.20",
+    "electron": "^33.0.0",
+    "electron-builder": "^25.1.8",
     "postcss": "^8.4.40",
     "tailwindcss": "^3.4.10",
     "vite": "^8.2.1"
+  },
+  "main": "electron/main.js",
+  "build": {
+    "appId": "com.meeting.notes",
+    "productName": "MeetingNotes",
+    "directories": {
+      "output": "release/desktop"
+    },
+    "files": [
+      "electron/**/*",
+      "server/**/*",
+      "web/dist/**/*",
+      "python/**/*",
+      "package.json"
+    ],
+    "asarUnpack": [
+      "python/**"
+    ],
+    "mac": {
+      "target": [
+        "dmg",
+        "zip"
+      ],
+      "category": "public.app-category.productivity"
+    },
+    "win": {
+      "target": [
+        "nsis"
+      ]
+    },
+    "linux": {
+      "target": [
+        "AppImage"
+      ],
+      "category": "Office"
+    }
   }
 }

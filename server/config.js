@@ -19,6 +19,8 @@ export const MODELS_DIR = path.join(os.homedir(), '.meeting', 'models');
 export const PYTHON_SERVE_URL = 'http://127.0.0.1:8300';
 
 export const PORT = process.env.PORT || 3000;
+// 桌面端默认只监听本机回环；需要局域网访问时设置 MEETING_BIND_HOST=0.0.0.0
+export const BIND_HOST = process.env.MEETING_BIND_HOST || '127.0.0.1';
 
 export const DEFAULT_SETTINGS = {
   llm: { baseUrl: '', apiKey: '', model: '', temperature: 0.3 },
