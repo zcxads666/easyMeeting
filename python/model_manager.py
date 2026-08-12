@@ -12,6 +12,29 @@ QWEN_MODELS = ["Qwen/Qwen3-ASR-Flash", "Qwen/Qwen3-ASR-Flash-FileTrans"]
 
 DEFAULT_SOURCE = os.environ.get("MEETING_MODEL_SOURCE", "modelscope")  # modelscope | huggingface
 
+# 未安装模型的预估占用（GB，用于界面提示），安装后以实际 size_bytes 为准
+REFERENCE_SIZES_GB = {
+    "whisper-tiny": 0.08,
+    "whisper-base": 0.15,
+    "whisper-small": 0.5,
+    "whisper-medium": 1.5,
+    "whisper-large-v3": 3.0,
+    "Qwen/Qwen3-ASR-Flash": 2.5,
+    "Qwen/Qwen3-ASR-Flash-FileTrans": 2.5,
+}
+
+
+def dir_size_bytes(d):
+    """统计目录内所有文件大小（含子目录）"""
+    total = 0
+    for f in Path(d).rglob("*"):
+        if f.is_file():
+            try:
+                total += f.stat().st_size
+            except OSError:
+                pass
+    return total
+
 
 def ensure_dir():
     MODELS_DIR.mkdir(parents=True, exist_ok=True)
@@ -26,29 +49,26 @@ def _qwen_local_dir(model_id):
     return MODELS_DIR / f"qwen-{name}"
 
 
+def _append_model(models, mid, kind, label, d):
+    installed = exists(d)
+    models.append({
+        "id": mid,
+        "kind": kind,
+        "label": label,
+        "installed": installed,
+        "path": str(d),
+        "size_bytes": dir_size_bytes(d) if installed else 0,
+        "estimated_size_bytes": int(REFERENCE_SIZES_GB.get(mid, 0) * 1024 ** 3),
+    })
+
+
 def list_models():
     ensure_dir()
     models = []
     for size in WHISPER_SIZES:
-        d = _whisper_local_dir(size)
-        models.append({
-            "id": f"whisper-{size}",
-            "kind": "whisper",
-            "label": f"Whisper {size}",
-            "size": size,
-            "installed": exists(d),
-            "path": str(d),
-        })
+        _append_model(models, f"whisper-{size}", "whisper", f"Whisper {size}", _whisper_local_dir(size))
     for mid in QWEN_MODELS:
-        d = _qwen_local_dir(mid)
-        models.append({
-            "id": mid,
-            "kind": "qwen",
-            "label": mid,
-            "size": mid,
-            "installed": exists(d),
-            "path": str(d),
-        })
+        _append_model(models, mid, "qwen", mid, _qwen_local_dir(mid))
     return models
 
 
@@ -129,11 +149,4 @@ def delete(id):
 
 def disk_usage():
     ensure_dir()
-    total = 0
-    for f in MODELS_DIR.rglob("*"):
-        if f.is_file():
-            try:
-                total += f.stat().st_size
-            except OSError:
-                pass
-    return total
+    return dir_size_bytes(MODELS_DIR)

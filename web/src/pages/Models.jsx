@@ -160,7 +160,13 @@ function ModelRow({ m, current, downloading, status, onDownload, onDelete, onSwi
           <p className="font-medium">{m.label}</p>
           {isCurrent && <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400">当前使用</span>}
         </div>
-        <p className="text-xs text-gray-400 mt-0.5">{m.kind === 'whisper' ? 'faster-whisper' : 'transformers'} · {m.id}</p>
+        <p className="text-xs text-gray-400 mt-0.5">
+          {m.kind === 'whisper' ? 'faster-whisper' : 'transformers'} · {m.id}
+          {' · '}
+          <span className="text-gray-500 dark:text-gray-400">
+            {m.installed ? formatBytes(m.size_bytes) : `约 ${formatBytes(m.estimated_size_bytes)}`}
+          </span>
+        </p>
         {isDownloading && (
           <div className="mt-2">
             <div className="w-full h-1.5 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden">
