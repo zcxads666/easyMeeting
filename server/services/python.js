@@ -15,6 +15,8 @@ let shouldRun = false; // 是否应保持运行（用户未主动停止）
 let consecutiveRestarts = 0;
 let startedAtMtime = 0; // 本次启动时推理源码的最新 mtime（用于检测代码更新）
 let lastSpawnAttempt = 0; // 最近一次尝试拉起的时间（节流）
+let intentionalKill = false; // 主动 kill（restartPython/stopPython），exit 时不触发自动重启
+let restartInProgress = false; // restartPython 进行中：期间任何子进程退出都不触发自动重启
 
 // 推理服务端口：默认 PYTHON_PORT（8300），被占用时自动递增更换空闲端口
 let pyPort = PYTHON_PORT;
@@ -129,6 +131,25 @@ async function findFreePort(start) {
   return null;
 }
 
+// 等待端口释放（kill 后进程优雅关闭需要时间）
+async function waitPortFree(port, timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
+    if (!(await portInUse(port))) return true;
+    await sleep(200);
+  }
+  return false;
+}
+
+// 等待子进程退出（kill 后进程退出即端口释放，比 TCP 探测更可靠）
+function waitChildExit(target, timeoutMs = 3000) {
+  return new Promise((resolve) => {
+    if (!target) return resolve();
+    const timer = setTimeout(resolve, timeoutMs);
+    target.once('exit', () => { clearTimeout(timer); resolve(); });
+  });
+}
+
 async function launch() {
   let pythonBin;
   try {
@@ -148,11 +169,14 @@ async function launch() {
   });
   child.stdout.on('data', (d) => process.stdout.write(`[python] ${d}`));
   child.stderr.on('data', (d) => process.stderr.write(`[python:err] ${d}`));
-  child.on('exit', async (code) => {
+  child.on('exit', async (code, signal) => {
     console.log(`[python] exited with code ${code}`);
     child = null;
-    // 异常退出时自动重启（指数退避，最多 5 次）
-    if (shouldRun && code !== 0) {
+    const wasIntentional = intentionalKill;
+    intentionalKill = false;
+    // 仅"崩溃退出"才自动重启：restartPython 进行中不参与、
+    // 非主动 kill（restartPython/stopPython）、非外部信号终止、退出码非 0
+    if (!restartInProgress && shouldRun && !wasIntentional && code !== 0 && signal === null) {
       if (consecutiveRestarts >= 5) {
         console.error('[python] 重启次数过多，放弃自动重启');
         shouldRun = false;
@@ -208,6 +232,7 @@ export async function spawnPython() {
 }
 
 export function stopPython() {
+  intentionalKill = true;
   shouldRun = false;
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
   if (child) { child.kill(); child = null; }
@@ -237,19 +262,38 @@ async function pythonCodeMtime() {
 
 // 重启推理服务并等待就绪（上限 waitMs，避免请求长时间阻塞）
 async function restartPython(waitMs = 8000) {
-  shouldRun = false;
-  if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
-  if (child) { child.kill(); child = null; }
-  shouldRun = true;
-  consecutiveRestarts = 0;
-  launch();
-  const deadline = Date.now() + waitMs;
-  while (Date.now() < deadline) {
-    await sleep(500);
-    if (await isHealthy()) { console.log('[python] inference service restarted'); return true; }
+  restartInProgress = true;
+  intentionalKill = true;
+  try {
+    shouldRun = false;
+    if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+    const oldChild = child;
+    if (oldChild) { oldChild.kill(); child = null; }
+    // 等待旧进程退出（进程退出即端口释放），复用端口避免漂移；
+    // 若超时仍未退出，则更换空闲端口
+    await waitChildExit(oldChild);
+    if (await portInUse(pyPort)) {
+      const free = await findFreePort(pyPort + 1);
+      if (free) {
+        console.warn(`[python] 端口 ${pyPort} 释放超时，切换至 ${free}`);
+        pyPort = free;
+      }
+    } else {
+      await sleep(300); // 等待 OS 完成端口释放
+    }
+    shouldRun = true;
+    consecutiveRestarts = 0;
+    launch();
+    const deadline = Date.now() + waitMs;
+    while (Date.now() < deadline) {
+      await sleep(500);
+      if (await isHealthy()) { console.log('[python] inference service restarted'); return true; }
+    }
+    console.warn(`[python] 重启 ${waitMs}ms 内未就绪`);
+    return false;
+  } finally {
+    restartInProgress = false;
   }
-  console.warn(`[python] 重启 ${waitMs}ms 内未就绪`);
-  return false;
 }
 
 // 模型接口调用前调用：检测推理源码变更自动重启；未就绪时按节流拉起
