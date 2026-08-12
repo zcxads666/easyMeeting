@@ -13,7 +13,8 @@ export default function Settings() {
   const { settings, loadSettings, saveSettings } = useStore();
   const [form, setForm] = useState(null);
   const [testMsg, setTestMsg] = useState('');
-  const [saved, setSaved] = useState(false);
+  const [asrTestMsg, setAsrTestMsg] = useState('');
+  const [savedSection, setSavedSection] = useState('');
 
   useEffect(() => { loadSettings().then(() => setForm(useStore.getState().settings)); }, []);
   useEffect(() => { setForm(settings); }, [settings]);
@@ -24,18 +25,32 @@ export default function Settings() {
     setForm((f) => ({ ...f, [section]: { ...f[section], [key]: value } }));
   };
 
-  const onSave = async () => {
+  const saveSection = async (section) => {
+    await saveSettings({ [section]: form[section] });
+    setSavedSection(section);
+    setTimeout(() => setSavedSection(''), 1500);
+  };
+
+  const saveAll = async () => {
     await saveSettings(form);
-    setSaved(true);
-    setTimeout(() => setSaved(false), 1500);
+    setSavedSection('all');
+    setTimeout(() => setSavedSection(''), 1500);
   };
 
   const testLLM = async () => {
     setTestMsg('测试中…');
     try {
-      await api('/settings/llm/test', { method: 'POST', body: form });
-      setTestMsg('✅ 连接成功');
+      const r = await api('/settings/llm/test', { method: 'POST', body: form });
+      setTestMsg('✅ ' + (r.message || '连接成功'));
     } catch (e) { setTestMsg('❌ ' + e.message); }
+  };
+
+  const testASR = async () => {
+    setAsrTestMsg('测试中…');
+    try {
+      const r = await api('/settings/asr/test', { method: 'POST', body: form });
+      setAsrTestMsg('✅ ' + (r.message || '连接成功'));
+    } catch (e) { setAsrTestMsg('❌ ' + e.message); }
   };
 
   return (
@@ -44,8 +59,11 @@ export default function Settings() {
 
       {/* LLM */}
       <section className="card p-6 mb-6">
-        <h2 className="font-semibold mb-4">语言模型 LLM</h2>
-        <p className="text-sm text-gray-400 mb-4">统一使用 OpenAI 兼容接口，可填入任意云端或本地模型</p>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold">语言模型 LLM</h2>
+          {savedSection === 'llm' && <span className="text-xs text-green-600">✓ 已保存</span>}
+        </div>
+        <p className="text-sm text-gray-400 dark:text-gray-500 mb-4">统一使用 OpenAI 兼容接口，可填入任意云端或本地模型</p>
         <div className="space-y-4">
           <Field label="Base URL" hint="如 https://api.openai.com/v1">
             <input className="input" value={form.llm.baseUrl} onChange={(e) => set('llm', 'baseUrl', e.target.value)} placeholder="https://…/v1" />
@@ -61,14 +79,18 @@ export default function Settings() {
           </Field>
           <div className="flex items-center gap-3">
             <button className="btn-secondary" onClick={testLLM}>测试连接</button>
-            <span className="text-sm text-gray-500">{testMsg}</span>
+            <button className="btn-primary" onClick={() => saveSection('llm')}>保存 LLM</button>
+            <span className="text-sm text-gray-500 dark:text-gray-400">{testMsg}</span>
           </div>
         </div>
       </section>
 
       {/* ASR 云端 */}
       <section className="card p-6 mb-6">
-        <h2 className="font-semibold mb-4">语音识别 ASR</h2>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="font-semibold">语音识别 ASR</h2>
+          {savedSection === 'asr' && <span className="text-xs text-green-600">✓ 已保存</span>}
+        </div>
         <Field label="识别引擎">
           <div className="flex flex-wrap gap-2">
             {asrProviders.map((p) => (
@@ -76,7 +98,7 @@ export default function Settings() {
                 key={p.id}
                 onClick={() => set('asr', 'provider', p.id)}
                 className={`px-4 py-2 rounded-full text-sm border transition-colors ${
-                  form.asr.provider === p.id ? 'bg-apple-blue text-white border-apple-blue' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50'
+                  form.asr.provider === p.id ? 'bg-apple-blue text-white border-apple-blue' : 'bg-white border-gray-200 text-gray-600 hover:bg-gray-50 dark:bg-[#2c2c2e] dark:border-white/10 dark:text-gray-300 dark:hover:bg-[#3a3a3c]'
                 }`}
               >
                 {p.label}
@@ -105,15 +127,21 @@ export default function Settings() {
           </div>
         )}
         {form.asr.provider === 'local' && (
-          <p className="text-sm text-gray-400 mt-4">本地模型请前往「模型」页管理 whisper 与 Qwen3-ASR。</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-4">本地模型请前往「模型」页管理 whisper 与 Qwen3-ASR。</p>
         )}
+
+        <div className="flex items-center gap-3 mt-5">
+          <button className="btn-secondary" onClick={testASR}>测试 ASR</button>
+          <button className="btn-primary" onClick={() => saveSection('asr')}>保存 ASR</button>
+          <span className="text-sm text-gray-500 dark:text-gray-400">{asrTestMsg}</span>
+        </div>
       </section>
 
       {/* 纠错开关 */}
       <section className="card p-6 mb-6 flex items-center justify-between">
         <div>
           <h2 className="font-semibold">错别字纠正</h2>
-          <p className="text-sm text-gray-400">转写后自动纠正同音字与口语冗余</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500">转写后自动纠正同音字与口语冗余</p>
         </div>
         <Toggle checked={form.correction.enabled} onChange={(v) => set('correction', 'enabled', v)} />
       </section>
@@ -122,13 +150,13 @@ export default function Settings() {
       <section className="card p-6 mb-6 flex items-center justify-between">
         <div>
           <h2 className="font-semibold">外观</h2>
-          <p className="text-sm text-gray-400">切换明暗主题</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500">切换明暗主题</p>
         </div>
         <Toggle checked={form.ui.theme === 'dark'} onChange={(v) => set('ui', 'theme', v ? 'dark' : 'light')} />
       </section>
 
-      <button className="btn-primary w-full" onClick={onSave}>
-        {saved ? '✓ 已保存' : '保存设置'}
+      <button className="btn-primary w-full" onClick={saveAll}>
+        {savedSection === 'all' ? '✓ 已保存' : '保存全部设置'}
       </button>
     </div>
   );
@@ -147,7 +175,7 @@ function Toggle({ checked, onChange }) {
   return (
     <button
       onClick={() => onChange(!checked)}
-      className={`w-12 h-7 rounded-full transition-colors relative ${checked ? 'bg-apple-blue' : 'bg-gray-300'}`}
+      className={`w-12 h-7 rounded-full transition-colors relative ${checked ? 'bg-apple-blue' : 'bg-gray-300 dark:bg-white/20'}`}
     >
       <span className={`absolute top-1 w-5 h-5 rounded-full bg-white transition-all ${checked ? 'left-6' : 'left-1'}`} />
     </button>

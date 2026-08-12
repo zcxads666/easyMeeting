@@ -130,3 +130,18 @@ function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function cryptoRandom() {
   return (globalThis.crypto?.randomUUID?.() || 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx').replace(/-/g, '').slice(0, 32);
 }
+/* ---------------- 千问 ---------------- */
+
+// 轻量可用性验证：DashScope OpenAI 兼容模式 models 列表
+export async function qwenTest(settings) {
+  const { apiKey } = settings.asr.qwen;
+  if (!apiKey) throw new Error('未配置千问 API Key');
+  const res = await fetch('https://dashscope.aliyuncs.com/compatible-mode/v1/models', {
+    headers: { Authorization: `Bearer ${apiKey}` }
+  });
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`鉴权失败: ${body.message || body.error?.message || res.statusText || res.status}`);
+  }
+  return '千问 API Key 有效，模型列表可达';
+}

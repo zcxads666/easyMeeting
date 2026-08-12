@@ -180,3 +180,12 @@ export function volcRealtime(settings) {
     close() { try { ws?.close(); } catch {} }
   };
 }
+/* ---------------- 火山 ---------------- */
+
+// 轻量可用性验证：走鉴权接口获取临时 token
+export async function volcTest(settings) {
+  const { appid, token } = settings.asr.volc;
+  if (!appid || !token) throw new Error('未配置火山 appid/token');
+  await getAppToken(appid, token);
+  return '火山鉴权通过，临时 token 获取成功';
+}

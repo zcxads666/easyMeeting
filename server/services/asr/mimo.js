@@ -78,7 +78,7 @@ function splitSegments(text) {
 }
 
 // 将 16kHz 16bit mono PCM Buffer 转为 WAV Buffer
-function pcmToWav(pcm) {
+export function pcmToWav(pcm) {
   const sampleRate = 16000;
   const bitsPerSample = 16;
   const numChannels = 1;
@@ -98,4 +98,30 @@ function pcmToWav(pcm) {
   header.write('data', 36);
   header.writeUInt32LE(dataLen, 40);
   return Buffer.concat([header, pcm]);
+}
+
+/* ---------------- MiMo ---------------- */
+
+// 轻量可用性验证：0.1 秒静音 WAV 走真实转写接口，区分鉴权失败与链路问题
+export async function mimoTest(settings) {
+  const { apiKey, model } = settings.asr.mimo;
+  if (!apiKey) throw new Error('未配置 MiMo API Key');
+  if (!model) throw new Error('未配置 MiMo 模型');
+  const silence = pcmToWav(Buffer.alloc(1600)); // 0.1s @16kHz s16le
+  const res = await fetch(`${BASE}/chat/completions`, {
+    method: 'POST',
+    headers: { 'api-key': apiKey, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: `data:audio/wav;base64,${silence.toString('base64')}` } }] }]
+    })
+  });
+  if (res.status === 401 || res.status === 403) {
+    throw new Error('MiMo API Key 无效或权限不足');
+  }
+  if (!res.ok) {
+    const body = await res.json().catch(() => ({}));
+    throw new Error(`调用失败: ${body.error?.message || body.message || res.statusText || res.status}`);
+  }
+  return 'MiMo API Key 有效，转写接口可达';
 }

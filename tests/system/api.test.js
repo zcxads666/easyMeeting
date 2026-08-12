@@ -173,6 +173,37 @@ test('验收4a: LLM 未配置时全部端点返回 400 不崩溃', async () => {
   assert.equal(h.status, 200);
 });
 
+test('验收4a2: ASR 测试端点（未配置/未就绪时 400 不崩溃）', async () => {
+  // 千问未配置 key
+  let { res, data } = await api('POST', '/api/settings/asr/test', {
+    asr: { provider: 'qwen', qwen: { apiKey: '' } }
+  });
+  assert.equal(res.status, 400);
+  assert.ok(data.error);
+
+  // 火山未配置
+  ({ res, data } = await api('POST', '/api/settings/asr/test', {
+    asr: { provider: 'volc', volc: { appid: '', token: '' } }
+  }));
+  assert.equal(res.status, 400);
+
+  // MiMo 未配置
+  ({ res, data } = await api('POST', '/api/settings/asr/test', {
+    asr: { provider: 'mimo', mimo: { apiKey: '' } }
+  }));
+  assert.equal(res.status, 400);
+
+  // 本地（Python 未启动时为 400，已启动则返回 200/400 均可，但不崩溃）
+  ({ res } = await api('POST', '/api/settings/asr/test', { asr: { provider: 'local' } }));
+  assert.ok(res.status === 200 || res.status === 400, `local 状态 ${res.status}`);
+
+  // 服务仍存活
+  const { res: h } = await api('GET', '/api/health');
+  assert.equal(h.status, 200);
+  // 还原默认 provider
+  await api('PATCH', '/api/settings', { asr: { provider: 'qwen' } });
+});
+
 test('验收4b: 静态资源 + SPA 回退', async () => {
   // 首页 HTML
   const homeText = await (await fetch(`${BASE}/`)).text();

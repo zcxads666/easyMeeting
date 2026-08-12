@@ -55,3 +55,18 @@ export function localRealtime(settings) {
     }
   }
 }
+/* ---------------- 本地 ---------------- */
+
+// 轻量可用性验证：推理服务健康 + 当前模型已安装
+export async function localTest(settings) {
+  const { engine, model } = settings.asr.local;
+  const health = await fetch(`${PYTHON_SERVE_URL}/health`).catch(() => null);
+  if (!health || !health.ok) throw new Error('本地推理服务未启动，请运行 npm run setup:python');
+  if (!model) throw new Error('未配置本地模型，请前往「模型」页选择');
+  const modelsRes = await fetch(`${PYTHON_SERVE_URL}/models`).catch(() => null);
+  const data = modelsRes?.ok ? await modelsRes.json() : { models: [] };
+  const m = (data.models || []).find((x) => x.id === model);
+  if (!m) throw new Error(`模型不存在: ${model}`);
+  if (!m.installed) throw new Error(`模型未安装: ${model}，请前往「模型」页下载`);
+  return `本地推理服务正常（${engine}），模型 ${model} 已安装`;
+}
