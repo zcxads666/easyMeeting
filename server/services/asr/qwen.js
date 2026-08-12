@@ -1,5 +1,4 @@
 import { transcodeToPcm, transcodeToWav, toBase64DataUri, mimeFor } from '../audio/ffmpeg.js';
-import { PYTHON_SERVE_URL } from '../../config.js';
 
 function normalizeSegments(rawText, baseMs = 0, stepMs = 3000) {
   // 简单切分：按句号/换行切句，为每句分配时间戳

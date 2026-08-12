@@ -116,4 +116,6 @@ def transcribe(req: TranscribeReq):
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="127.0.0.1", port=8300)
+    # 端口由 Node 侧动态分配（被占用时自动更换），默认 8300
+    port = int(os.environ.get("MEETING_PY_PORT", "8300"))
+    uvicorn.run(app, host="127.0.0.1", port=port)

@@ -1,9 +1,9 @@
 import { transcodeToPcm } from '../audio/ffmpeg.js';
-import { PYTHON_SERVE_URL } from '../../config.js';
+import { getPythonUrl } from '../python.js';
 
 /* 本地 ASR：委托 Python 推理服务 */
 async function callPython(path, body) {
-  const res = await fetch(`${PYTHON_SERVE_URL}${path}`, {
+  const res = await fetch(`${getPythonUrl()}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify(body)
@@ -60,10 +60,10 @@ export function localRealtime(settings) {
 // 轻量可用性验证：推理服务健康 + 当前模型已安装
 export async function localTest(settings) {
   const { engine, model } = settings.asr.local;
-  const health = await fetch(`${PYTHON_SERVE_URL}/health`).catch(() => null);
+  const health = await fetch(`${getPythonUrl()}/health`).catch(() => null);
   if (!health || !health.ok) throw new Error('本地推理服务未启动，请运行 npm run setup:python');
   if (!model) throw new Error('未配置本地模型，请前往「模型」页选择');
-  const modelsRes = await fetch(`${PYTHON_SERVE_URL}/models`).catch(() => null);
+  const modelsRes = await fetch(`${getPythonUrl()}/models`).catch(() => null);
   const data = modelsRes?.ok ? await modelsRes.json() : { models: [] };
   const m = (data.models || []).find((x) => x.id === model);
   if (!m) throw new Error(`模型不存在: ${model}`);

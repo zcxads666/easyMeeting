@@ -1,11 +1,11 @@
 import { spawn, execFile } from 'node:child_process';
-import net from 'node:net';
 import { promisify } from 'node:util';
 import { access, readFile, stat } from 'node:fs/promises';
 import { accessSync } from 'node:fs';
+import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
-import { ROOT, PYTHON_SERVE_URL } from '../config.js';
+import { ROOT, PYTHON_PORT } from '../config.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -15,6 +15,12 @@ let shouldRun = false; // 是否应保持运行（用户未主动停止）
 let consecutiveRestarts = 0;
 let startedAtMtime = 0; // 本次启动时推理源码的最新 mtime（用于检测代码更新）
 let lastSpawnAttempt = 0; // 最近一次尝试拉起的时间（节流）
+
+// 推理服务端口：默认 PYTHON_PORT（8300），被占用时自动递增更换空闲端口
+let pyPort = PYTHON_PORT;
+
+export function getPythonPort() { return pyPort; }
+export function getPythonUrl() { return `http://127.0.0.1:${pyPort}`; }
 
 // Electron 打包后 python 目录在 app.asar.unpacked（spawn 子进程需要真实文件路径）
 function resolvePythonDir() {
@@ -104,6 +110,25 @@ async function ensureVenv() {
   return VENV_PYTHON;
 }
 
+// 探测 TCP 端口是否被占用（区分"端口空闲"与"被占用但服务未就绪"）
+function portInUse(port) {
+  return new Promise((resolve) => {
+    const sock = net.connect({ port, host: '127.0.0.1' });
+    sock.setTimeout(1500);
+    sock.once('connect', () => { sock.destroy(); resolve(true); });
+    sock.once('error', () => resolve(false));
+    sock.once('timeout', () => { sock.destroy(); resolve(true); });
+  });
+}
+
+// 从 start 起寻找第一个空闲端口（最多探测 20 个）
+async function findFreePort(start) {
+  for (let p = start; p < start + 20; p++) {
+    if (!(await portInUse(p))) return p;
+  }
+  return null;
+}
+
 async function launch() {
   let pythonBin;
   try {
@@ -119,7 +144,7 @@ async function launch() {
   startedAtMtime = await pythonCodeMtime();
   child = spawn(pythonBin, ['-u', pyMain], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env }
+    env: { ...process.env, MEETING_PY_PORT: String(pyPort) }
   });
   child.stdout.on('data', (d) => process.stdout.write(`[python] ${d}`));
   child.stderr.on('data', (d) => process.stderr.write(`[python:err] ${d}`));
@@ -128,20 +153,21 @@ async function launch() {
     child = null;
     // 异常退出时自动重启（指数退避，最多 5 次）
     if (shouldRun && code !== 0) {
-      // 端口被外部进程占用：不再自动重启（避免无限循环），等待健康检查兜底
-      if (await portInUse(PY_PORT)) {
-        console.warn(`[python] 端口 ${PY_PORT} 被其他进程占用，停止自动重启`);
-        shouldRun = false;
-        consecutiveRestarts = 0;
-        return;
-      }
-      consecutiveRestarts++;
-      if (consecutiveRestarts > 5) {
+      if (consecutiveRestarts >= 5) {
         console.error('[python] 重启次数过多，放弃自动重启');
         shouldRun = false;
         consecutiveRestarts = 0;
         return;
       }
+      // 若当前端口被外部进程抢占，自动更换空闲端口再重启
+      if (await portInUse(pyPort)) {
+        const free = await findFreePort(pyPort + 1);
+        if (free) {
+          console.warn(`[python] 端口 ${pyPort} 被占用，自动切换至 ${free}`);
+          pyPort = free;
+        }
+      }
+      consecutiveRestarts++;
       const delay = Math.min(30000, 2000 * consecutiveRestarts);
       console.log(`[python] 将在 ${delay}ms 后自动重启 (第 ${consecutiveRestarts} 次)…`);
       restartTimer = setTimeout(() => {
@@ -154,20 +180,18 @@ async function launch() {
 }
 
 export async function spawnPython() {
-  // 已健康则跳过
+  // 已健康则跳过（可能是本进程此前 spawn 的服务）
   if (await isHealthy()) { shouldRun = true; return true; }
 
-  // 端口被占用但无健康服务：可能是启动中或异常进程。
-  // 等待其恢复而非重复 spawn（避免 address already in use 循环）
-  if (await portInUse(PY_PORT)) {
-    console.warn(`[python] 端口 ${PY_PORT} 已被占用但服务未就绪，等待现有进程恢复…`);
-    const deadline = Date.now() + 10000;
-    while (Date.now() < deadline) {
-      await sleep(500);
-      if (await isHealthy()) return true;
+  // 默认端口被占用：自动更换空闲端口，避免与残留/外部进程冲突
+  if (await portInUse(pyPort)) {
+    const free = await findFreePort(pyPort + 1);
+    if (free === null) {
+      console.error('[python] 找不到可用端口，无法启动推理服务');
+      return false;
     }
-    console.warn(`[python] 端口 ${PY_PORT} 被异常进程占用，无法启动推理服务；请结束后台 python main.py 进程后重试`);
-    return false;
+    console.warn(`[python] 端口 ${pyPort} 已被占用，自动切换至 ${free}`);
+    pyPort = free;
   }
 
   shouldRun = true;
@@ -191,7 +215,7 @@ export function stopPython() {
 
 export async function isHealthy() {
   try {
-    const res = await fetch(`${PYTHON_SERVE_URL}/health`);
+    const res = await fetch(`${getPythonUrl()}/health`);
     return res.ok;
   } catch {
     return false;
@@ -253,19 +277,6 @@ export async function ensureFreshPython({ wait = true } = {}) {
     if (await isHealthy()) return true;
   }
   return false;
-}
-
-const PY_PORT = Number(new URL(PYTHON_SERVE_URL).port) || 8300;
-
-// 探测 TCP 端口是否被占用（区分"端口空闲"与"被占用但服务未就绪"）
-function portInUse(port) {
-  return new Promise((resolve) => {
-    const sock = net.connect({ port, host: '127.0.0.1' });
-    sock.setTimeout(1500);
-    sock.once('connect', () => { sock.destroy(); resolve(true); });
-    sock.once('error', () => resolve(false));
-    sock.once('timeout', () => { sock.destroy(); resolve(true); });
-  });
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }

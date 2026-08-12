@@ -1,12 +1,12 @@
 import { Router, json } from 'express';
-import { PYTHON_SERVE_URL } from '../config.js';
+import { getPythonUrl } from '../services/python.js';
 import { ensureFreshPython } from '../services/python.js';
 
 const router = Router();
 router.use(json());
 
 async function proxy(path, req, res, { fresh = false } = {}) {
-  const doFetch = () => fetch(`${PYTHON_SERVE_URL}${path}`, {
+  const doFetch = () => fetch(`${getPythonUrl()}${path}`, {
     method: req.method,
     headers: { 'Content-Type': 'application/json' },
     body: req.method !== 'GET' ? JSON.stringify(req.body || {}) : undefined

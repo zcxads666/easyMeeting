@@ -163,10 +163,19 @@ async function waitForUrl(url, tries) {
 }
 
 // ---------- 生命周期 ----------
+// 关窗口即退出（含 macOS）：避免"只关前端、后端 Python 残留占用端口"
 app.on('window-all-closed', () => {
-  if (process.platform !== 'darwin') app.quit();
+  app.quit();
 });
 
 app.on('before-quit', () => {
   stopPython?.();
 });
+
+// 收到终止信号时同样清理 Python 子进程
+for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP']) {
+  process.on(sig, () => {
+    stopPython?.();
+    app.quit();
+  });
+}

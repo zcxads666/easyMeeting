@@ -16,7 +16,9 @@ export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
 export const MODELS_DIR = path.join(os.homedir(), '.meeting', 'models');
 
-export const PYTHON_SERVE_URL = 'http://127.0.0.1:8300';
+// 推理服务默认端口（运行时可能被占用自动更换，见 services/python.js）
+export const PYTHON_PORT = Number(process.env.MEETING_PY_PORT) || 8300;
+export const PYTHON_SERVE_URL = `http://127.0.0.1:${PYTHON_PORT}`;
 
 export const PORT = process.env.PORT || 3000;
 // 桌面端默认只监听本机回环；需要局域网访问时设置 MEETING_BIND_HOST=0.0.0.0
