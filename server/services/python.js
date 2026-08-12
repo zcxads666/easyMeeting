@@ -17,6 +17,7 @@ let startedAtMtime = 0; // 本次启动时推理源码的最新 mtime（用于�
 let lastSpawnAttempt = 0; // 最近一次尝试拉起的时间（节流）
 let intentionalKill = false; // 主动 kill（restartPython/stopPython），exit 时不触发自动重启
 let restartInProgress = false; // restartPython 进行中：期间任何子进程退出都不触发自动重启
+let spawnPromise = null; // spawn 互斥去重锁：并发调用复用同一个进行中的启动流程
 
 // 推理服务端口：默认 PYTHON_PORT（8300），被占用时自动递增更换空闲端口
 let pyPort = PYTHON_PORT;
@@ -131,16 +132,6 @@ async function findFreePort(start) {
   return null;
 }
 
-// 等待端口释放（kill 后进程优雅关闭需要时间）
-async function waitPortFree(port, timeoutMs) {
-  const deadline = Date.now() + timeoutMs;
-  while (Date.now() < deadline) {
-    if (!(await portInUse(port))) return true;
-    await sleep(200);
-  }
-  return false;
-}
-
 // 等待子进程退出（kill 后进程退出即端口释放，比 TCP 探测更可靠）
 function waitChildExit(target, timeoutMs = 3000) {
   return new Promise((resolve) => {
@@ -183,19 +174,12 @@ async function launch() {
         consecutiveRestarts = 0;
         return;
       }
-      // 若当前端口被外部进程抢占，自动更换空闲端口再重启
-      if (await portInUse(pyPort)) {
-        const free = await findFreePort(pyPort + 1);
-        if (free) {
-          console.warn(`[python] 端口 ${pyPort} 被占用，自动切换至 ${free}`);
-          pyPort = free;
-        }
-      }
       consecutiveRestarts++;
       const delay = Math.min(30000, 2000 * consecutiveRestarts);
       console.log(`[python] 将在 ${delay}ms 后自动重启 (第 ${consecutiveRestarts} 次)…`);
       restartTimer = setTimeout(() => {
-        launch();
+        // 带锁启动，避免与并发 spawn 抢端口
+        startPython({ resetRestarts: false }).catch(() => {});
         // 重置计数（如果稳定运行一段时间）
         setTimeout(() => { if (child) consecutiveRestarts = 0; }, 60000);
       }, delay);
@@ -203,32 +187,45 @@ async function launch() {
   });
 }
 
-export async function spawnPython() {
-  // 已健康则跳过（可能是本进程此前 spawn 的服务）
-  if (await isHealthy()) { shouldRun = true; return true; }
-
-  // 默认端口被占用：自动更换空闲端口，避免与残留/外部进程冲突
-  if (await portInUse(pyPort)) {
-    const free = await findFreePort(pyPort + 1);
-    if (free === null) {
-      console.error('[python] 找不到可用端口，无法启动推理服务');
-      return false;
+// 启动进程（带互斥锁）：并发调用复用同一个进行中的启动流程，
+// 彻底避免"检查端口→spawn"之间被并发抢占导致的 address already in use
+function startPython({ resetRestarts = true } = {}) {
+  if (spawnPromise) return spawnPromise;
+  spawnPromise = (async () => {
+    // 已健康则跳过（可能是本进程此前 spawn 的服务）
+    if (await isHealthy()) { shouldRun = true; return true; }
+    // 默认端口被占用：自动更换空闲端口（锁内检查，无并发竞态）
+    if (await portInUse(pyPort)) {
+      const free = await findFreePort(pyPort + 1);
+      if (free === null) {
+        console.error('[python] 找不到可用端口，无法启动推理服务');
+        return false;
+      }
+      console.warn(`[python] 端口 ${pyPort} 已被占用，自动切换至 ${free}`);
+      pyPort = free;
     }
-    console.warn(`[python] 端口 ${pyPort} 已被占用，自动切换至 ${free}`);
-    pyPort = free;
-  }
+    shouldRun = true;
+    if (resetRestarts) consecutiveRestarts = 0;
+    lastSpawnAttempt = Date.now();
+    launch();
+    return true;
+  })().finally(() => { spawnPromise = null; });
+  return spawnPromise;
+}
 
-  shouldRun = true;
-  consecutiveRestarts = 0;
-  launch();
-
-  // 等待就绪（首次安装依赖时给足时间）
-  for (let i = 0; i < 600; i++) {
-    await sleep(500);
+async function waitHealthy(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  while (Date.now() < deadline) {
     if (await isHealthy()) { console.log('[python] inference service ready'); return true; }
+    await sleep(500);
   }
-  console.log('[python] inference service not ready (will retry on demand)');
   return false;
+}
+
+export async function spawnPython() {
+  await startPython();
+  // 首次安装依赖时给足时间
+  return waitHealthy(30000);
 }
 
 export function stopPython() {
@@ -269,28 +266,12 @@ async function restartPython(waitMs = 8000) {
     if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
     const oldChild = child;
     if (oldChild) { oldChild.kill(); child = null; }
-    // 等待旧进程退出（进程退出即端口释放），复用端口避免漂移；
-    // 若超时仍未退出，则更换空闲端口
+    // 等待旧进程退出（进程退出即端口释放），复用端口避免漂移
     await waitChildExit(oldChild);
-    if (await portInUse(pyPort)) {
-      const free = await findFreePort(pyPort + 1);
-      if (free) {
-        console.warn(`[python] 端口 ${pyPort} 释放超时，切换至 ${free}`);
-        pyPort = free;
-      }
-    } else {
-      await sleep(300); // 等待 OS 完成端口释放
-    }
     shouldRun = true;
     consecutiveRestarts = 0;
-    launch();
-    const deadline = Date.now() + waitMs;
-    while (Date.now() < deadline) {
-      await sleep(500);
-      if (await isHealthy()) { console.log('[python] inference service restarted'); return true; }
-    }
-    console.warn(`[python] 重启 ${waitMs}ms 内未就绪`);
-    return false;
+    await startPython();
+    return waitHealthy(waitMs);
   } finally {
     restartInProgress = false;
   }
