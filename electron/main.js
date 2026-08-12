@@ -1,4 +1,5 @@
-import { app, BrowserWindow, shell } from 'electron';
+import { app, BrowserWindow, shell, dialog } from 'electron';
+import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -36,8 +37,10 @@ async function bootstrap() {
   // 必须在 import server 模块之前设置数据目录环境变量：
   // server 模块顶层会基于 DATA_DIR 创建 multer 存储目录（见 routes/meetings.js），
   // 打包后 app.asar 是只读的，若仍指向 ROOT/data 会在加载时崩溃。
-  if (!isDev && !process.env.MEETING_DATA_DIR) {
-    process.env.MEETING_DATA_DIR = path.join(app.getPath('userData'), 'data');
+  if (!isDev) {
+    // Python venv 放到 userData（unpacked 目录在 Windows Program Files 下不可写）
+    process.env.MEETING_VENV_DIR ||= path.join(app.getPath('userData'), 'python-venv');
+    process.env.MEETING_DATA_DIR ||= path.join(app.getPath('userData'), 'data');
   }
 
   // 动态 import：确保上面环境变量设置先于 server 模块加载
@@ -92,7 +95,14 @@ function createWindow() {
     // 开发模式：等待 vite dev server 就绪后加载
     waitForUrl(DEV_URL, 60).then(() => mainWindow.loadURL(DEV_URL));
   } else {
-    mainWindow.loadFile(path.join(__dirname, '..', 'web', 'dist', 'index.html'));
+    const distIndex = path.join(__dirname, '..', 'web', 'dist', 'index.html');
+    if (!fs.existsSync(distIndex)) {
+      console.error('[electron] 缺少前端构建产物 web/dist，请先运行 npm run build');
+      dialog.showErrorBox('启动失败', '缺少前端构建产物 web/dist\n\n请先运行: npm run build');
+      app.exit(1);
+      return;
+    }
+    mainWindow.loadFile(distIndex);
   }
 
   mainWindow.on('closed', () => { mainWindow = null; });
@@ -102,14 +112,31 @@ function createWindow() {
     mainWindow.webContents.once('did-finish-load', async () => {
       console.log('[smoke] window loaded');
       try {
+        // preload 注入
         const bridge = await mainWindow.webContents.executeJavaScript(
           'JSON.stringify(window.meetingBridge || {})'
         );
         console.log('[smoke] bridge:', bridge);
+        // 渲染进程 API 连通
         const health = await mainWindow.webContents.executeJavaScript(
           `fetch('${baseUrl}/api/health').then(r => r.json()).then(JSON.stringify)`
         );
-        console.log('[smoke] health via renderer:', health);
+        console.log('[smoke] health:', health);
+        // React 应用是否真正渲染（#root 有内容 = JS 加载并挂载成功，防白屏）
+        const rendered = await mainWindow.webContents.executeJavaScript(
+          `JSON.stringify({
+            rootChildren: document.querySelector('#root')?.children.length || 0,
+            hasTitle: document.body.innerText.includes('会议纪要'),
+            scriptsLoaded: [...document.scripts].map(s => s.src)
+          })`
+        );
+        console.log('[smoke] rendered:', rendered);
+        const info = JSON.parse(rendered);
+        if (info.rootChildren === 0) {
+          console.error('[smoke] FAIL: 页面 JS 未渲染（白屏），资源加载可能失败');
+          app.exit(1);
+          return;
+        }
         console.log('[smoke] PASS');
         app.exit(0);
       } catch (e) {

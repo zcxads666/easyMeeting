@@ -28,14 +28,26 @@ export function createServer(options = {}) {
 
   const app = express();
   const server = http.createServer(app);
-  const io = new Server(server, { cors: { origin: '*' } });
 
-  // CORS：桌面端渲染进程可能从 file:// 或本地 dev server 跨源访问
+  // CORS：仅允许桌面端 file:// 页面（Origin: null）与本地 dev server 跨源访问，
+  // 阻止任意网页读取本地数据（127.0.0.1 随机端口 + 白名单）
+  const ALLOWED_ORIGINS = new Set([
+    'null', // file:// 页面在 CORS 中 Origin 为字符串 "null"
+    'http://localhost:5173',
+    'http://127.0.0.1:5173'
+  ]);
+  const corsCheck = (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.has(origin));
+  const io = new Server(server, { cors: { origin: corsCheck } });
   app.use((req, res, next) => {
-    res.setHeader('Access-Control-Allow-Origin', '*');
-    res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
-    if (req.method === 'OPTIONS') return res.sendStatus(204);
+    const origin = req.headers.origin || '';
+    const allowed = ALLOWED_ORIGINS.has(origin);
+    if (allowed) {
+      res.setHeader('Access-Control-Allow-Origin', origin);
+      res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    }
+    // 无 Origin（同源/curl）不受影响；OPTIONS 预检按白名单放行
+    if (req.method === 'OPTIONS') return res.sendStatus(allowed ? 204 : 403);
     next();
   });
 

@@ -26,7 +26,11 @@ function resolvePythonDir() {
 }
 
 const PY_DIR = resolvePythonDir();
-const VENV_DIR = path.join(PY_DIR, '.venv');
+// venv 目录默认跟随源码目录；Electron 生产环境应通过 MEETING_VENV_DIR
+// 指向 userData 等可写位置（Windows 安装到 Program Files 时 unpacked 目录不可写）
+const VENV_DIR = process.env.MEETING_VENV_DIR
+  ? path.resolve(process.env.MEETING_VENV_DIR)
+  : path.join(PY_DIR, '.venv');
 // Windows 与 POSIX 的 venv 内 python 路径不同
 const VENV_PYTHON = os.platform() === 'win32'
   ? path.join(VENV_DIR, 'Scripts', 'python.exe')
@@ -90,7 +94,7 @@ async function ensureVenv() {
     console.error('[python] 未找到 Python 3.9+，请先安装 Python（https://www.python.org/downloads/）');
     return null;
   }
-  console.log(`[python] 使用 ${systemPython} 创建虚拟环境 python/.venv …`);
+  console.log(`[python] 使用 ${systemPython} 创建虚拟环境 ${VENV_DIR} …`);
   await execFileAsync(systemPython, ['-m', 'venv', VENV_DIR]);
   console.log('[python] 正在安装依赖（首次可能需要几分钟，请耐心等待）…');
   await pipInstall(VENV_PYTHON, ['--upgrade', 'pip', ...(await readRequirements())]);

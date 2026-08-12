@@ -175,8 +175,11 @@ test('验收4a: LLM 未配置时全部端点返回 400 不崩溃', async () => {
 
 test('验收4b: 静态资源 + SPA 回退', async () => {
   // 首页 HTML
-  const home = await fetch(`${BASE}/`);
-  assert.match(await home.text(), /<div id="root">/);
+  const homeText = await (await fetch(`${BASE}/`)).text();
+  assert.match(homeText, /<div id="root">/);
+  // 桌面端 file:// 加载要求资源为相对路径（vite base='./'），绝对路径 /assets 会白屏
+  const absAssets = homeText.match(/(?:src|href)="\/assets\//);
+  assert.ok(!absAssets, `index.html 资源必须为相对路径，禁止 /assets 绝对路径: ${absAssets?.[0]}`);
 
   // 构建产物 JS 可访问（非 HTML）
   const distDir = path.join(ROOT, 'web', 'dist', 'assets');
