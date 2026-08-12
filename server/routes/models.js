@@ -1,6 +1,6 @@
 import { Router, json } from 'express';
 import { PYTHON_SERVE_URL } from '../config.js';
-import { spawnPython } from '../services/python.js';
+import { ensureFreshPython } from '../services/python.js';
 
 const router = Router();
 router.use(json());
@@ -12,13 +12,16 @@ async function proxy(path, req, res) {
     body: req.method !== 'GET' ? JSON.stringify(req.body || {}) : undefined
   });
 
+  // 每次模型请求前确保推理服务运行最新代码（源码变更自动重启，免手动重启应用）
+  try { await ensureFreshPython(); } catch { /* 忽略，继续尝试请求 */ }
+
   let r;
   try {
     r = await doFetch();
   } catch {
-    // Python 服务未启动：尝试后台拉起，等待就绪后重试一次
+    // 首次失败：重新拉起服务并重试一次
     try {
-      await spawnPython();
+      await ensureFreshPython();
       r = await doFetch();
     } catch (e) {
       return res.status(502).json({ error: `本地推理服务未启动: ${e.message}` });
