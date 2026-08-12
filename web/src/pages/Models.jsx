@@ -13,33 +13,34 @@ export default function Models() {
   const pollRef = useRef(null);
   const retryTimerRef = useRef(null);
 
-  // 加载模型列表；失败或占用未计算完成时自动重试（不阻塞删除/切换操作）
-  const load = useCallback(async (retries = 3) => {
-    setLoading(true);
+  // 加载模型列表；失败或占用未计算完成时自动重试。
+  // silent=true 时静默刷新（保留旧列表，避免闪烁/滚动跳动）
+  const load = useCallback(async (retries = 3, silent = false) => {
+    if (!silent) setLoading(true);
     try {
       const data = await api('/models');
       setModels(data.models || []);
       setDiskUsage(data.disk_usage || 0);
       setError('');
       if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
-      // 已安装模型占用尚未返回（如服务刚热重启）：1.5s 后自动重试直到拿到实际大小
+      // 已安装模型占用尚未返回（如服务刚热重启）：1.5s 后静默重试直到拿到实际大小
       const pendingSize = (data.models || []).some((m) => m.installed && !m.size_bytes);
       if (pendingSize && retries > 0) {
         retryTimerRef.current = setTimeout(() => {
           retryTimerRef.current = null;
-          load(retries - 1);
+          load(retries - 1, true);
         }, 1500);
       }
     } catch (e) {
-      setError('本地推理服务未启动：' + e.message);
-      // 5 秒后自动重试
+      if (!silent) setError('本地推理服务未启动：' + e.message);
+      // 5 秒后静默重试
       if (!retryTimerRef.current) {
         retryTimerRef.current = setTimeout(() => {
           retryTimerRef.current = null;
-          load();
+          load(3, true);
         }, 5000);
       }
-    } finally { setLoading(false); }
+    } finally { if (!silent) setLoading(false); }
   }, []);
 
   const pollStatus = async () => {
@@ -74,7 +75,7 @@ export default function Models() {
     const st = status[downloading];
     if (st && (st.status === 'completed' || st.status === 'failed')) {
       setDownloading(null);
-      load();
+      load(3, true);
       if (st.status === 'failed') setError(`下载失败: ${st.error || ''}`);
     }
   }, [status, downloading, load]);
@@ -94,7 +95,7 @@ export default function Models() {
     if (!confirm('确定删除该模型？')) return;
     try {
       await api(`/models/${encodeURIComponent(id)}`, { method: 'DELETE' });
-      await load();
+      await load(3, true);
     } catch (e) { setError(e.message); }
   };
 
@@ -102,7 +103,7 @@ export default function Models() {
     try {
       await api('/models/switch', { method: 'POST', body: { id } });
       await useStore.getState().saveSettings({ asr: { local: { engine: id.startsWith('whisper') ? 'whisper' : 'qwen', model: id } } });
-      await load();
+      await load(3, true);
     } catch (e) { setError(e.message); }
   };
 
