@@ -1,6 +1,6 @@
 import { spawn, execFile } from 'node:child_process';
 import { promisify } from 'node:util';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, stat } from 'node:fs/promises';
 import { accessSync } from 'node:fs';
 import path from 'node:path';
 import os from 'node:os';
@@ -12,6 +12,8 @@ let child = null;
 let restartTimer = null;
 let shouldRun = false; // 是否应保持运行（用户未主动停止）
 let consecutiveRestarts = 0;
+let startedAtMtime = 0; // 本次启动时推理源码的最新 mtime（用于检测代码更新）
+let lastSpawnAttempt = 0; // 最近一次尝试拉起的时间（节流）
 
 // Electron 打包后 python 目录在 app.asar.unpacked（spawn 子进程需要真实文件路径）
 function resolvePythonDir() {
@@ -113,6 +115,7 @@ async function launch() {
   if (!pythonBin) return;
 
   const pyMain = path.join(PY_DIR, 'main.py');
+  startedAtMtime = await pythonCodeMtime();
   child = spawn(pythonBin, ['-u', pyMain], {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env }
@@ -172,6 +175,57 @@ export async function isHealthy() {
   } catch {
     return false;
   }
+}
+
+// 推理服务源码文件的最新 mtime（main.py / model_manager.py / transcribe_* / requirements.txt）
+async function pythonCodeMtime() {
+  const files = ['main.py', 'model_manager.py', 'transcribe_whisper.py', 'transcribe_qwen.py', 'requirements.txt'];
+  let max = 0;
+  for (const f of files) {
+    try {
+      const st = await stat(path.join(PY_DIR, f));
+      max = Math.max(max, st.mtimeMs);
+    } catch { /* 文件缺失忽略 */ }
+  }
+  return max;
+}
+
+// 重启推理服务并等待就绪
+async function restartPython() {
+  shouldRun = false;
+  if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
+  if (child) { child.kill(); child = null; }
+  shouldRun = true;
+  consecutiveRestarts = 0;
+  launch();
+  for (let i = 0; i < 600; i++) {
+    await sleep(500);
+    if (await isHealthy()) { console.log('[python] inference service restarted'); return true; }
+  }
+  return false;
+}
+
+// 模型接口调用前调用：检测推理源码变更自动重启；未就绪时按节流拉起
+export async function ensureFreshPython() {
+  if (await isHealthy()) {
+    // 仅重启本进程管理的子进程（child 存在）；外部/遗留服务不接管，避免端口冲突
+    const current = await pythonCodeMtime();
+    if (child && current > startedAtMtime) {
+      console.log('[python] 检测到推理服务代码更新，自动重启…');
+      return restartPython();
+    }
+    return true;
+  }
+  if (Date.now() - lastSpawnAttempt > 10000) {
+    lastSpawnAttempt = Date.now();
+    spawnPython().catch(() => {});
+  }
+  // 短暂等待就绪（最多 ~8s），避免长时间阻塞模型请求
+  for (let i = 0; i < 16; i++) {
+    await sleep(500);
+    if (await isHealthy()) return true;
+  }
+  return false;
 }
 
 function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }

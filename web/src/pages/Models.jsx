@@ -164,7 +164,9 @@ function ModelRow({ m, current, downloading, status, onDownload, onDelete, onSwi
           {m.kind === 'whisper' ? 'faster-whisper' : 'transformers'} · {m.id}
           {' · '}
           <span className="text-gray-500 dark:text-gray-400">
-            {m.installed ? formatBytes(m.size_bytes) : `约 ${formatBytes(m.estimated_size_bytes)}`}
+            {m.installed
+              ? (m.size_bytes > 0 ? formatBytes(m.size_bytes) : '占用计算中…')
+              : (m.estimated_size_bytes ? `约 ${formatBytes(m.estimated_size_bytes)}` : '')}
           </span>
         </p>
         {isDownloading && (
