@@ -13,8 +13,8 @@ export default function Models() {
   const pollRef = useRef(null);
   const retryTimerRef = useRef(null);
 
-  // 加载模型列表；失败时自动重试（Python 服务可能仍在启动）
-  const load = useCallback(async () => {
+  // 加载模型列表；失败或占用未计算完成时自动重试（不阻塞删除/切换操作）
+  const load = useCallback(async (retries = 3) => {
     setLoading(true);
     try {
       const data = await api('/models');
@@ -22,6 +22,14 @@ export default function Models() {
       setDiskUsage(data.disk_usage || 0);
       setError('');
       if (retryTimerRef.current) { clearTimeout(retryTimerRef.current); retryTimerRef.current = null; }
+      // 已安装模型占用尚未返回（如服务刚热重启）：1.5s 后自动重试直到拿到实际大小
+      const pendingSize = (data.models || []).some((m) => m.installed && !m.size_bytes);
+      if (pendingSize && retries > 0) {
+        retryTimerRef.current = setTimeout(() => {
+          retryTimerRef.current = null;
+          load(retries - 1);
+        }, 1500);
+      }
     } catch (e) {
       setError('本地推理服务未启动：' + e.message);
       // 5 秒后自动重试

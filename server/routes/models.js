@@ -5,15 +5,18 @@ import { ensureFreshPython } from '../services/python.js';
 const router = Router();
 router.use(json());
 
-async function proxy(path, req, res) {
+async function proxy(path, req, res, { fresh = false } = {}) {
   const doFetch = () => fetch(`${PYTHON_SERVE_URL}${path}`, {
     method: req.method,
     headers: { 'Content-Type': 'application/json' },
     body: req.method !== 'GET' ? JSON.stringify(req.body || {}) : undefined
   });
 
-  // 每次模型请求前确保推理服务运行最新代码（源码变更自动重启，免手动重启应用）
-  try { await ensureFreshPython(); } catch { /* 忽略，继续尝试请求 */ }
+  // 仅列表/状态请求等待代码热重启（fresh=true，有短超时）；
+  // 删除/切换/下载不等待，避免用户操作被重启阻塞
+  if (fresh) {
+    try { await ensureFreshPython(); } catch { /* 忽略，继续尝试请求 */ }
+  }
 
   let r;
   try {
@@ -35,8 +38,8 @@ async function proxy(path, req, res) {
   }
 }
 
-router.get('/', (req, res) => proxy('/models', req, res));
-router.get('/download/status', (req, res) => proxy('/models/download/status', req, res));
+router.get('/', (req, res) => proxy('/models', req, res, { fresh: true }));
+router.get('/download/status', (req, res) => proxy('/models/download/status', req, res, { fresh: true }));
 router.post('/download', (req, res) => proxy('/models/download', req, res));
 router.post('/switch', (req, res) => proxy('/models/switch', req, res));
 router.delete('/:id', (req, res) => proxy(`/models/${encodeURIComponent(req.params.id)}`, req, res));

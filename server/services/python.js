@@ -190,29 +190,34 @@ async function pythonCodeMtime() {
   return max;
 }
 
-// 重启推理服务并等待就绪
-async function restartPython() {
+// 重启推理服务并等待就绪（上限 waitMs，避免请求长时间阻塞）
+async function restartPython(waitMs = 8000) {
   shouldRun = false;
   if (restartTimer) { clearTimeout(restartTimer); restartTimer = null; }
   if (child) { child.kill(); child = null; }
   shouldRun = true;
   consecutiveRestarts = 0;
   launch();
-  for (let i = 0; i < 600; i++) {
+  const deadline = Date.now() + waitMs;
+  while (Date.now() < deadline) {
     await sleep(500);
     if (await isHealthy()) { console.log('[python] inference service restarted'); return true; }
   }
+  console.warn(`[python] 重启 ${waitMs}ms 内未就绪`);
   return false;
 }
 
 // 模型接口调用前调用：检测推理源码变更自动重启；未就绪时按节流拉起
-export async function ensureFreshPython() {
+export async function ensureFreshPython({ wait = true } = {}) {
   if (await isHealthy()) {
     // 仅重启本进程管理的子进程（child 存在）；外部/遗留服务不接管，避免端口冲突
     const current = await pythonCodeMtime();
     if (child && current > startedAtMtime) {
       console.log('[python] 检测到推理服务代码更新，自动重启…');
-      return restartPython();
+      if (wait) return restartPython(8000);
+      // 非等待：后台重启，不阻塞当前请求
+      restartPython(8000).catch(() => {});
+      return true;
     }
     return true;
   }
@@ -221,7 +226,8 @@ export async function ensureFreshPython() {
     spawnPython().catch(() => {});
   }
   // 短暂等待就绪（最多 ~8s），避免长时间阻塞模型请求
-  for (let i = 0; i < 16; i++) {
+  const deadline = Date.now() + 8000;
+  while (Date.now() < deadline) {
     await sleep(500);
     if (await isHealthy()) return true;
   }
