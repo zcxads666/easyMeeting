@@ -6,7 +6,9 @@ async function callPython(path, body) {
   const res = await fetch(`${getPythonUrl()}${path}`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(body)
+    body: JSON.stringify(body),
+    // 120s 超时：本地转写可能较慢，但避免 Python 卡死时无限挂起
+    signal: AbortSignal.timeout(120000)
   });
   const json = await res.json();
   if (!res.ok) throw new Error(`本地 ASR 失败: ${json.error || res.statusText}`);
@@ -60,10 +62,10 @@ export function localRealtime(settings) {
 // 轻量可用性验证：推理服务健康 + 当前模型已安装
 export async function localTest(settings) {
   const { engine, model } = settings.asr.local;
-  const health = await fetch(`${getPythonUrl()}/health`).catch(() => null);
+  const health = await fetch(`${getPythonUrl()}/health`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
   if (!health || !health.ok) throw new Error('本地推理服务未启动，请运行 npm run setup:python');
   if (!model) throw new Error('未配置本地模型，请前往「模型」页选择');
-  const modelsRes = await fetch(`${getPythonUrl()}/models`).catch(() => null);
+  const modelsRes = await fetch(`${getPythonUrl()}/models`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
   const data = modelsRes?.ok ? await modelsRes.json() : { models: [] };
   const m = (data.models || []).find((x) => x.id === model);
   if (!m) throw new Error(`模型不存在: ${model}`);

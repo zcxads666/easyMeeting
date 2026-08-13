@@ -9,7 +9,9 @@ async function proxy(path, req, res, { fresh = false } = {}) {
   const doFetch = () => fetch(`${getPythonUrl()}${path}`, {
     method: req.method,
     headers: { 'Content-Type': 'application/json' },
-    body: req.method !== 'GET' ? JSON.stringify(req.body || {}) : undefined
+    body: req.method !== 'GET' ? JSON.stringify(req.body || {}) : undefined,
+    // 15s 超时：Python 卡死时不无限挂起模型请求
+    signal: AbortSignal.timeout(15000)
   });
 
   // 仅列表/状态请求等待代码热重启（fresh=true，有短超时）；

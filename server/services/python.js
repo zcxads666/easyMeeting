@@ -245,8 +245,24 @@ export function stopPython() {
 
 export async function isHealthy() {
   try {
-    const res = await fetch(`${getPythonUrl()}/health`);
+    // 2s 超时：Python 卡死（如模型加载阻塞）时不阻塞健康检查与等待循环
+    const res = await fetch(`${getPythonUrl()}/health`, {
+      signal: AbortSignal.timeout(2000)
+    });
     return res.ok;
+  } catch {
+    return false;
+  }
+}
+
+// 是否有模型下载任务进行中（下载期间重启 Python 会中断下载线程）
+async function hasActiveDownload() {
+  try {
+    const res = await fetch(`${getPythonUrl()}/models/download/status`, {
+      signal: AbortSignal.timeout(3000)
+    });
+    const { downloads } = await res.json();
+    return Object.values(downloads || {}).some((d) => d.status === 'downloading');
   } catch {
     return false;
   }
@@ -291,6 +307,11 @@ export async function ensureFreshPython({ wait = true } = {}) {
     // 仅重启本进程管理的子进程（child 存在）；外部/遗留服务不接管，避免端口冲突
     const current = await pythonCodeMtime();
     if (child && current > startedAtMtime) {
+      // 模型下载进行中：延后重启（否则会中断下载线程）
+      if (await hasActiveDownload()) {
+        console.log('[python] 模型下载进行中，延后热重启');
+        return true;
+      }
       console.log('[python] 检测到推理服务代码更新，自动重启…');
       if (wait) return restartPython(8000);
       // 非等待：后台重启，不阻塞当前请求
