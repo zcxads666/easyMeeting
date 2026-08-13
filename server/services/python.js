@@ -18,6 +18,7 @@ let lastSpawnAttempt = 0; // 最近一次尝试拉起的时间（节流）
 let intentionalKill = false; // 主动 kill（restartPython/stopPython），exit 时不触发自动重启
 let restartInProgress = false; // restartPython 进行中：期间任何子进程退出都不触发自动重启
 let spawnPromise = null; // spawn 互斥去重锁：并发调用复用同一个进行中的启动流程
+let lastLaunchAt = 0; // 最近一次 spawn 的时间：启动冷却，避免"进程未绑定端口"窗口期重复 spawn
 
 // 推理服务端口：默认 PYTHON_PORT（8300），被占用时自动递增更换空闲端口
 let pyPort = PYTHON_PORT;
@@ -178,8 +179,8 @@ async function launch() {
       const delay = Math.min(30000, 2000 * consecutiveRestarts);
       console.log(`[python] 将在 ${delay}ms 后自动重启 (第 ${consecutiveRestarts} 次)…`);
       restartTimer = setTimeout(() => {
-        // 带锁启动，避免与并发 spawn 抢端口
-        startPython({ resetRestarts: false }).catch(() => {});
+        // 带锁启动，避免与并发 spawn 抢端口；进程已死需重启，跳过冷却
+        startPython({ resetRestarts: false, skipCooldown: true }).catch(() => {});
         // 重置计数（如果稳定运行一段时间）
         setTimeout(() => { if (child) consecutiveRestarts = 0; }, 60000);
       }, delay);
@@ -189,11 +190,16 @@ async function launch() {
 
 // 启动进程（带互斥锁）：并发调用复用同一个进行中的启动流程，
 // 彻底避免"检查端口→spawn"之间被并发抢占导致的 address already in use
-function startPython({ resetRestarts = true } = {}) {
+function startPython({ resetRestarts = true, skipCooldown = false } = {}) {
   if (spawnPromise) return spawnPromise;
   spawnPromise = (async () => {
     // 已健康则跳过（可能是本进程此前 spawn 的服务）
-    if (await isHealthy()) { shouldRun = true; return true; }
+    if (await isHealthy()) { shouldRun = true; return 'ok'; }
+    // 启动冷却：前一次 spawn 后 Python 进程尚未绑定端口（~1s 窗口），
+    // 此时 portInUse 会误判空闲导致重复 spawn；冷却期内不重复启动
+    if (!skipCooldown && Date.now() - lastLaunchAt < 6000) {
+      return 'starting';
+    }
     // 默认端口被占用：自动更换空闲端口（锁内检查，无并发竞态）
     if (await portInUse(pyPort)) {
       const free = await findFreePort(pyPort + 1);
@@ -207,8 +213,9 @@ function startPython({ resetRestarts = true } = {}) {
     shouldRun = true;
     if (resetRestarts) consecutiveRestarts = 0;
     lastSpawnAttempt = Date.now();
+    lastLaunchAt = Date.now();
     launch();
-    return true;
+    return 'started';
   })().finally(() => { spawnPromise = null; });
   return spawnPromise;
 }
@@ -223,7 +230,8 @@ async function waitHealthy(timeoutMs) {
 }
 
 export async function spawnPython() {
-  await startPython();
+  const st = await startPython();
+  if (st === false) return false; // 找不到可用端口，直接失败
   // 首次安装依赖时给足时间
   return waitHealthy(30000);
 }
@@ -270,7 +278,7 @@ async function restartPython(waitMs = 8000) {
     await waitChildExit(oldChild);
     shouldRun = true;
     consecutiveRestarts = 0;
-    await startPython();
+    await startPython({ skipCooldown: true });
     return waitHealthy(waitMs);
   } finally {
     restartInProgress = false;
