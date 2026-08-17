@@ -19,12 +19,28 @@ export default function Meeting() {
   const workletRef = useRef(null);
   const segmentsRef = useRef([]);
 
+  const stopCapture = () => {
+    socket.emit('rt:stop', { meetingId: id });
+    try {
+      workletRef.current?.disconnect();
+      mediaRef.current?.getTracks().forEach((t) => t.stop());
+      audioCtxRef.current?.close();
+    } catch {}
+    workletRef.current = null;
+    mediaRef.current = null;
+    audioCtxRef.current = null;
+  };
+
   useEffect(() => {
     connectSocket();
     api(`/meetings/${id}`).then(setMeeting).catch(() => setError('加载会议失败'));
 
-    const onPartial = ({ text }) => setPartial(text);
-    const onFinal = ({ text, segments }) => {
+    const onPartial = ({ text, meetingId }) => {
+      if (meetingId && meetingId !== id) return;
+      setPartial(text);
+    };
+    const onFinal = ({ text, segments, meetingId }) => {
+      if (meetingId && meetingId !== id) return;
       setPartial('');
       segmentsRef.current = segments;
       setMeeting((m) => (m ? { ...m, segments, rawText: segments.map((s) => s.text).join('\n') } : m));
@@ -38,8 +54,11 @@ export default function Meeting() {
     socket.on('rt:final', onFinal);
     socket.on('rt:status', onStatus);
     socket.on('rt:error', onError);
+    window.addEventListener('beforeunload', stopCapture);
 
     return () => {
+      window.removeEventListener('beforeunload', stopCapture);
+      stopCapture();
       socket.off('rt:partial', onPartial);
       socket.off('rt:final', onFinal);
       socket.off('rt:status', onStatus);
@@ -83,13 +102,7 @@ export default function Meeting() {
   };
 
   const stopRecording = async () => {
-    socket.emit('rt:stop', { meetingId: id });
-    try {
-      workletRef.current?.disconnect();
-      mediaRef.current?.getTracks().forEach((t) => t.stop());
-      await audioCtxRef.current?.close();
-    } catch {}
-    // 稍后刷新会议
+    stopCapture();
     setTimeout(() => api(`/meetings/${id}`).then(setMeeting).catch(() => {}), 800);
   };
 

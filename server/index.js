@@ -75,7 +75,7 @@ export function createServer(options = {}) {
     });
   });
 
-  setupRealtime(io);
+  setupRealtime(io, options.createRealtimeStream);
 
   // 文件转写进度/结果推送
   queue.onProgress(({ taskId, ...data }) => io.emit('task:progress', { taskId, ...data }));

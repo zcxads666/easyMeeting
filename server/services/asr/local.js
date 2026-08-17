@@ -32,7 +32,7 @@ export function localRealtime(settings) {
 
   return {
     on(evt, fn) { emitMap.set(evt, [...(emitMap.get(evt) || []), fn]); },
-    start() { emit('open', {}); },
+    start() { emit('open', {}); return Promise.resolve(); },
     send(chunk) {
       buffer.push(Buffer.from(chunk));
       if (buffer.reduce((s, b) => s + b.length, 0) >= MAX) consume();

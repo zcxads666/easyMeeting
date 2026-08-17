@@ -52,6 +52,7 @@ export function mimoRealtime(settings) {
         if (buffer.length) flush();
       }, 5000);
       emit('open', {});
+      return Promise.resolve();
     },
     async stop() { await flush(); },
     close() { clearInterval(timer); }
