@@ -3,3 +3,6 @@
 const injected = typeof window !== 'undefined' ? window.meetingBridge?.baseUrl : '';
 const fallback = typeof window !== 'undefined' ? window.location.origin : '';
 export const BASE_URL = injected || fallback;
+export const API_TOKEN = (typeof window !== 'undefined' ? window.meetingBridge?.apiToken : '')
+  || (typeof import.meta !== 'undefined' ? import.meta.env?.VITE_MEETING_TOKEN : '')
+  || '';

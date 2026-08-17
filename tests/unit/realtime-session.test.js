@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { makeTestDirs, rmTestDirs } from '../helpers/tempdir.js';
+import { makeTestDirs, rmTestDirs, authHeaders } from '../helpers/tempdir.js';
 import { localRealtime } from '../../server/services/asr/local.js';
 import { mimoRealtime } from '../../server/services/asr/mimo.js';
 
@@ -50,7 +50,7 @@ after(async () => {
 async function api(method, url, body) {
   const res = await fetch(`http://127.0.0.1:${port}${url}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: authHeaders(srv.apiToken, body ? { 'Content-Type': 'application/json' } : {}),
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await res.json().catch(() => ({}));
@@ -59,7 +59,11 @@ async function api(method, url, body) {
 
 async function connectSocket() {
   const { io } = await import('socket.io-client');
-  const socket = io(`http://127.0.0.1:${port}`, { transports: ['websocket'], timeout: 5000 });
+  const socket = io(`http://127.0.0.1:${port}`, {
+    transports: ['websocket'],
+    timeout: 5000,
+    auth: { token: srv.apiToken }
+  });
   await new Promise((resolve, reject) => {
     const t = setTimeout(() => reject(new Error('连接超时')), 5000);
     socket.on('connect', () => { clearTimeout(t); resolve(); });

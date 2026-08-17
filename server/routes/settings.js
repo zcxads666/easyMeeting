@@ -1,5 +1,5 @@
 import { Router, json } from 'express';
-import { getSettings, saveSettings } from '../services/store/jsonstore.js';
+import { getSettings, saveSettings, redactSettings } from '../services/store/jsonstore.js';
 import { test } from '../services/llm/openai.js';
 import { qwenTest } from '../services/asr/qwen.js';
 import { volcTest } from '../services/asr/volc.js';
@@ -10,11 +10,11 @@ const router = Router();
 router.use(json());
 
 router.get('/', async (_req, res) => {
-  res.json(await getSettings());
+  res.json(redactSettings(await getSettings()));
 });
 
 router.patch('/', async (req, res) => {
-  res.json(await saveSettings(req.body));
+  res.json(redactSettings(await saveSettings(req.body)));
 });
 
 // 测试 LLM 可达性

@@ -13,6 +13,10 @@ export function makeTestDirs() {
   return { dataDir, modelsDir };
 }
 
+export function authHeaders(token, extra = {}) {
+  return { 'X-Meeting-Token': token, ...extra };
+}
+
 export async function rmTestDirs(...dirs) {
   await Promise.all(dirs.map((d) => fsp.rm(d, { recursive: true, force: true })));
 }

@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { makeTestDirs, rmTestDirs } from '../helpers/tempdir.js';
+import { makeTestDirs, rmTestDirs, authHeaders } from '../helpers/tempdir.js';
 
 const { dataDir, modelsDir } = makeTestDirs();
 
@@ -88,15 +88,19 @@ test('合法 UUID CRUD 仍通过', async () => {
   assert.ok(!files.includes(`${id}.json`));
 });
 
+function tokenHeaders(extra = {}) {
+  return authHeaders(srv.apiToken, extra);
+}
+
 test('GET /api/meetings/..%2Fsettings 不得读到 apiKey', async () => {
-  const res = await fetch(`http://127.0.0.1:${port}/api/meetings/..%2Fsettings`);
+  const res = await fetch(`http://127.0.0.1:${port}/api/meetings/..%2Fsettings`, { headers: tokenHeaders() });
   const body = await res.text();
   assert.ok(res.status === 400 || res.status === 404, `status=${res.status} body=${body.slice(0, 200)}`);
   assert.ok(!body.includes(SECRET), '响应不得包含 settings apiKey');
 });
 
 test('GET %2e%2e%2f 同样拒绝', async () => {
-  const res = await fetch(`http://127.0.0.1:${port}/api/meetings/%2e%2e%2fsettings`);
+  const res = await fetch(`http://127.0.0.1:${port}/api/meetings/%2e%2e%2fsettings`, { headers: tokenHeaders() });
   const body = await res.text();
   assert.ok(res.status === 400 || res.status === 404, `status=${res.status}`);
   assert.ok(!body.includes(SECRET));
@@ -107,7 +111,7 @@ test('PATCH body.id 不得改写为目录外路径', async () => {
   await saveMeeting(meetingStub(id));
   const res = await fetch(`http://127.0.0.1:${port}/api/meetings/${id}`, {
     method: 'PATCH',
-    headers: { 'Content-Type': 'application/json' },
+    headers: tokenHeaders({ 'Content-Type': 'application/json' }),
     body: JSON.stringify({ id: '../settings', title: 'patched-title' })
   });
   const data = await res.json();
@@ -124,7 +128,10 @@ test('PATCH body.id 不得改写为目录外路径', async () => {
 });
 
 test('DELETE 穿越 id 不得删 settings', async () => {
-  const res = await fetch(`http://127.0.0.1:${port}/api/meetings/..%2Fsettings`, { method: 'DELETE' });
+  const res = await fetch(`http://127.0.0.1:${port}/api/meetings/..%2Fsettings`, {
+    method: 'DELETE',
+    headers: tokenHeaders()
+  });
   await res.json().catch(() => ({}));
   await fsp.access(SETTINGS_FILE);
   const settings = JSON.parse(await fsp.readFile(SETTINGS_FILE, 'utf8'));

@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
+import { BASE_URL, API_TOKEN } from '../env';
 import { BASE_URL } from '../env';
 
 export default function Summary() {
@@ -35,7 +36,10 @@ export default function Summary() {
     try {
       const res = await fetch(`${BASE_URL}/api/llm/summary/stream`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(API_TOKEN ? { 'X-Meeting-Token': API_TOKEN } : {})
+        },
         body: JSON.stringify({ text: meeting.corrected || meeting.rawText })
       });
       if (!res.ok) {

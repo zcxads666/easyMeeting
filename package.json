@@ -4,7 +4,7 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "concurrently -k -n server,web \"npm:dev:server\" \"npm:dev:web\"",
+    "dev": "MEETING_API_TOKEN=dev-local VITE_MEETING_TOKEN=dev-local concurrently -k -n server,web \"npm:dev:server\" \"npm:dev:web\"",
     "dev:server": "node --watch server/index.js",
     "dev:web": "vite --config web/vite.config.js",
     "build": "vite build --config web/vite.config.js",

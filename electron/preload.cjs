@@ -8,6 +8,7 @@ function readArg(prefix) {
 
 contextBridge.exposeInMainWorld('meetingBridge', {
   baseUrl: readArg('--meeting-base-url='),
+  apiToken: readArg('--meeting-api-token='),
   version: readArg('--meeting-version='),
   platform: process.platform
 });

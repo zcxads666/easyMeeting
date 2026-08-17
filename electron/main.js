@@ -9,6 +9,7 @@ const isDev = process.argv.includes('--dev');
 const DEV_URL = 'http://localhost:5173';
 let mainWindow = null;
 let serverPort = null;
+let apiToken = '';
 let stopPython = null;
 
 // 全局错误兜底：防止主进程未捕获异常导致静默崩溃
@@ -51,6 +52,7 @@ async function bootstrap() {
   // 内嵌会议服务（随机端口，仅监听 127.0.0.1，纯内部通信通道）
   const srv = createServer({ port: 0 });
   serverPort = await srv.start();
+  apiToken = srv.apiToken;
   console.log(`[electron] meeting server on 127.0.0.1:${serverPort}`);
 
   // 后台拉起 Python 推理服务（不阻塞）
@@ -80,6 +82,7 @@ function createWindow() {
       sandbox: false,
       additionalArguments: [
         `--meeting-base-url=${baseUrl}`,
+        `--meeting-api-token=${apiToken}`,
         `--meeting-version=${app.getVersion()}`
       ]
     }
@@ -119,7 +122,7 @@ function createWindow() {
         console.log('[smoke] bridge:', bridge);
         // 渲染进程 API 连通
         const health = await mainWindow.webContents.executeJavaScript(
-          `fetch('${baseUrl}/api/health').then(r => r.json()).then(JSON.stringify)`
+          `fetch('${baseUrl}/api/health', { headers: { 'X-Meeting-Token': window.meetingBridge?.apiToken || '' } }).then(r => r.json()).then(JSON.stringify)`
         );
         console.log('[smoke] health:', health);
         // React 应用是否真正渲染（#root 有内容 = JS 加载并挂载成功，防白屏）

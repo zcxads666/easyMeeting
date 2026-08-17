@@ -7,15 +7,17 @@ import {
 
 export function ensureDirs() {
   for (const dir of [DATA_DIR, MEETINGS_DIR, UPLOADS_DIR, TRASH_DIR]) {
-    fs.mkdirSync(dir, { recursive: true });
+    fs.mkdirSync(dir, { recursive: true, mode: 0o700 });
+    try { fs.chmodSync(dir, 0o700); } catch { /* 非 POSIX 忽略 */ }
   }
 }
 
 async function atomicWrite(file, data) {
   const tmp = `${file}.${process.pid}.tmp`;
-  await fsp.mkdir(path.dirname(file), { recursive: true });
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), 'utf8');
+  await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
   await fsp.rename(tmp, file);
+  try { await fsp.chmod(file, 0o600); } catch { /* 非 POSIX 忽略 */ }
 }
 
 export async function readJson(file, fallback) {
@@ -125,6 +127,25 @@ export async function getSettings() {
   };
 }
 
+function isMaskedSecret(v) {
+  return typeof v === 'string' && (/^\*+$/.test(v) || /^•+$/.test(v));
+}
+
+function pickSecret(curr, incoming) {
+  if (incoming == null || isMaskedSecret(incoming)) return curr || '';
+  return incoming;
+}
+
+export function redactSettings(s) {
+  const clone = structuredClone(s);
+  const mask = (v) => (v ? '********' : '');
+  if (clone.llm) clone.llm.apiKey = mask(clone.llm.apiKey);
+  if (clone.asr?.qwen) clone.asr.qwen.apiKey = mask(clone.asr.qwen.apiKey);
+  if (clone.asr?.mimo) clone.asr.mimo.apiKey = mask(clone.asr.mimo.apiKey);
+  if (clone.asr?.volc) clone.asr.volc.token = mask(clone.asr.volc.token);
+  return clone;
+}
+
 export async function saveSettings(patch) {
   const current = await getSettings();
   const next = {
@@ -142,6 +163,10 @@ export async function saveSettings(patch) {
     correction: { ...current.correction, ...(patch.correction || {}) },
     ui: { ...current.ui, ...(patch.ui || {}) }
   };
+  next.llm.apiKey = pickSecret(current.llm.apiKey, patch.llm?.apiKey);
+  next.asr.qwen.apiKey = pickSecret(current.asr.qwen.apiKey, patch.asr?.qwen?.apiKey);
+  next.asr.mimo.apiKey = pickSecret(current.asr.mimo.apiKey, patch.asr?.mimo?.apiKey);
+  next.asr.volc.token = pickSecret(current.asr.volc.token, patch.asr?.volc?.token);
   await ensureDirs();
   await writeJson(SETTINGS_FILE, next);
   return next;

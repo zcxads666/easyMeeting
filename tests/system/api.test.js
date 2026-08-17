@@ -9,6 +9,7 @@ import { ROOT } from '../../server/config.js';
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const PORT = 3999; // 独立端口避免冲突
 const BASE = `http://127.0.0.1:${PORT}`;
+const API_TOKEN = 'sys-test-token';
 
 let child = null;
 const TEST_DATA_DIR = path.join('/tmp', `meeting-sys-test-${Date.now()}`);
@@ -18,7 +19,7 @@ async function waitHealthy(timeoutMs = 15000) {
   const start = Date.now();
   while (Date.now() - start < timeoutMs) {
     try {
-      const res = await fetch(`${BASE}/api/health`);
+      const res = await fetch(`${BASE}/api/health`, { headers: { 'X-Meeting-Token': API_TOKEN } });
       if (res.ok) return;
     } catch {}
     await sleep(300);
@@ -29,7 +30,7 @@ async function waitHealthy(timeoutMs = 15000) {
 before(async () => {
   child = spawn(process.execPath, ['server/index.js'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), MEETING_DATA_DIR: TEST_DATA_DIR },
+    env: { ...process.env, PORT: String(PORT), MEETING_DATA_DIR: TEST_DATA_DIR, MEETING_API_TOKEN: API_TOKEN },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   child.stdout.on('data', (d) => process.stdout.write(`[srv] ${d}`));
@@ -46,7 +47,10 @@ after(async () => {
 async function api(method, url, body) {
   const res = await fetch(`${BASE}${url}`, {
     method,
-    headers: body ? { 'Content-Type': 'application/json' } : undefined,
+    headers: {
+      'X-Meeting-Token': API_TOKEN,
+      ...(body ? { 'Content-Type': 'application/json' } : {})
+    },
     body: body ? JSON.stringify(body) : undefined
   });
   const data = await res.json().catch(() => ({}));
@@ -92,7 +96,11 @@ test('验收1c: 实时转写 Socket.IO 全链路（mock 千问流）', async () 
   const { io } = await import('socket.io-client');
   const { data: m } = await api('POST', '/api/meetings', { title: '实时链路' });
 
-  const socket = io(`http://127.0.0.1:${PORT}`, { transports: ['websocket'], timeout: 5000 });
+  const socket = io(`http://127.0.0.1:${PORT}`, {
+    transports: ['websocket'],
+    timeout: 5000,
+    auth: { token: API_TOKEN }
+  });
   const received = [];
   await new Promise((resolve, reject) => {
     const timer = setTimeout(() => reject(new Error('连接超时')), 5000);
@@ -121,12 +129,19 @@ test('验收1d: 文件转写上传（不支持格式应 400）', async () => {
   // 构造 multipart 上传 .txt
   const form = new FormData();
   form.append('audio', new Blob(['not audio'], { type: 'text/plain' }), 'file.txt');
-  const res = await fetch(`${BASE}/api/meetings/${m.id}/transcribe`, { method: 'POST', body: form });
+  const res = await fetch(`${BASE}/api/meetings/${m.id}/transcribe`, {
+    method: 'POST',
+    headers: { 'X-Meeting-Token': API_TOKEN },
+    body: form
+  });
   assert.equal(res.status, 400);
   const data = await res.json();
   assert.match(data.error, /不支持的格式/);
   // 上传不存在文件应 400
-  const res2 = await fetch(`${BASE}/api/meetings/${m.id}/transcribe`, { method: 'POST' });
+  const res2 = await fetch(`${BASE}/api/meetings/${m.id}/transcribe`, {
+    method: 'POST',
+    headers: { 'X-Meeting-Token': API_TOKEN }
+  });
   assert.equal(res2.status, 400);
   await api('DELETE', `/api/meetings/${m.id}`);
 });
@@ -250,7 +265,11 @@ test('验收4c: 上传音频文件服务', async () => {
   ]);
   const form = new FormData();
   form.append('audio', new Blob([wav], { type: 'audio/wav' }), 'silence.wav');
-  const res = await fetch(`${BASE}/api/meetings/${m.id}/transcribe`, { method: 'POST', body: form });
+  const res = await fetch(`${BASE}/api/meetings/${m.id}/transcribe`, {
+    method: 'POST',
+    headers: { 'X-Meeting-Token': API_TOKEN },
+    body: form
+  });
   assert.equal(res.status, 200, 'WAV 上传应受理');
   const { taskId } = await res.json();
   assert.ok(taskId);

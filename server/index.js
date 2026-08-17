@@ -1,6 +1,8 @@
 import express from 'express';
 import http from 'node:http';
+import fs from 'node:fs';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Server } from 'socket.io';
 import { PORT, ROOT, UPLOADS_DIR } from './config.js';
@@ -16,40 +18,62 @@ import { checkFFmpeg } from './services/audio/ffmpeg.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 
+function resolveApiToken(options) {
+  if (process.env.MEETING_DISABLE_AUTH === '1') return '';
+  return options.apiToken || process.env.MEETING_API_TOKEN || randomBytes(24).toString('hex');
+}
+
 /**
  * 创建会议服务（可嵌入 Electron 主进程，也可独立运行）。
- * @returns {{ app, server, io, start, stop }}
+ * @returns {{ app, server, io, apiToken, start, stop }}
  */
 export function createServer(options = {}) {
   const host = options.host || '127.0.0.1';
   const port = options.port ?? PORT;
+  const apiToken = resolveApiToken(options);
 
   ensureDirs();
 
   const app = express();
   const server = http.createServer(app);
 
-  // CORS：仅允许桌面端 file:// 页面（Origin: null）与本地 dev server 跨源访问，
-  // 阻止任意网页读取本地数据（127.0.0.1 随机端口 + 白名单）
   const ALLOWED_ORIGINS = new Set([
-    'null', // file:// 页面在 CORS 中 Origin 为字符串 "null"
+    'null',
     'http://localhost:5173',
     'http://127.0.0.1:5173'
   ]);
   const corsCheck = (origin, cb) => cb(null, !origin || ALLOWED_ORIGINS.has(origin));
   const io = new Server(server, { cors: { origin: corsCheck } });
+
   app.use((req, res, next) => {
     const origin = req.headers.origin || '';
-    const allowed = ALLOWED_ORIGINS.has(origin);
-    if (allowed) {
+    if (origin && !ALLOWED_ORIGINS.has(origin)) {
+      return res.status(403).json({ error: 'forbidden origin' });
+    }
+    if (origin) {
       res.setHeader('Access-Control-Allow-Origin', origin);
       res.setHeader('Access-Control-Allow-Methods', 'GET,POST,PATCH,DELETE,OPTIONS');
-      res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+      res.setHeader('Access-Control-Allow-Headers', 'Content-Type, X-Meeting-Token');
     }
-    // 无 Origin（同源/curl）不受影响；OPTIONS 预检按白名单放行
-    if (req.method === 'OPTIONS') return res.sendStatus(allowed ? 204 : 403);
+    if (req.method === 'OPTIONS') return res.sendStatus(204);
     next();
   });
+
+  app.use((req, res, next) => {
+    if (!apiToken) return next();
+    if (!req.path.startsWith('/api/')) return next();
+    const got = req.get('x-meeting-token') || req.query.token || '';
+    if (got !== apiToken) return res.status(401).json({ error: 'unauthorized' });
+    next();
+  });
+
+  if (apiToken) {
+    io.use((socket, next) => {
+      const got = socket.handshake.auth?.token || socket.handshake.query?.token || '';
+      if (got !== apiToken) return next(new Error('unauthorized'));
+      next();
+    });
+  }
 
   app.use('/api/meetings', meetingsRoute);
   app.use('/api/settings', settingsRoute);
@@ -57,10 +81,8 @@ export function createServer(options = {}) {
   app.use('/api/llm', llmRoute);
   app.use('/uploads', express.static(UPLOADS_DIR));
 
-  // 前端静态资源
   const dist = path.join(ROOT, 'web', 'dist');
-  app.use(express.static(dist));
-  // 健康检查：报告 ffmpeg 与 python 依赖状态
+  app.use(express.static(dist, { index: false }));
   app.get('/api/health', async (_req, res) => {
     res.json({
       ffmpeg: await checkFFmpeg(),
@@ -70,14 +92,21 @@ export function createServer(options = {}) {
 
   app.get('*', (req, res) => {
     if (req.path.startsWith('/api/')) return res.status(404).json({ error: 'not found' });
-    res.sendFile(path.join(dist, 'index.html'), (err) => {
-      if (err) res.send('前端未构建，请运行 npm run dev 或 npm run build');
-    });
+    const index = path.join(dist, 'index.html');
+    try {
+      let html = fs.readFileSync(index, 'utf8');
+      if (apiToken) {
+        const inject = `<script>window.meetingBridge=Object.assign({},window.meetingBridge||{},{apiToken:${JSON.stringify(apiToken)}})</script>`;
+        html = html.includes('<head>') ? html.replace('<head>', `<head>${inject}`) : inject + html;
+      }
+      res.type('html').send(html);
+    } catch {
+      res.send('前端未构建，请运行 npm run dev 或 npm run build');
+    }
   });
 
   setupRealtime(io, options.createRealtimeStream);
 
-  // 文件转写进度/结果推送
   queue.onProgress(({ taskId, ...data }) => io.emit('task:progress', { taskId, ...data }));
   queue.onDone(() => {});
   queue.events.on('result', ({ taskId, ok, meetingId, error }) => {
@@ -88,7 +117,7 @@ export function createServer(options = {}) {
     app,
     server,
     io,
-    /** 启动监听，返回实际端口（port=0 时随机分配） */
+    apiToken,
     start() {
       return new Promise((resolve, reject) => {
         server.once('error', reject);
