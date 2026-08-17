@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
+import { BASE_URL } from '../env';
 
 export default function Summary() {
   const { id } = useParams();
@@ -32,7 +33,7 @@ export default function Summary() {
     setStreamText('');
 
     try {
-      const res = await fetch('/api/llm/summary/stream', {
+      const res = await fetch(`${BASE_URL}/api/llm/summary/stream`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ text: meeting.corrected || meeting.rawText })
