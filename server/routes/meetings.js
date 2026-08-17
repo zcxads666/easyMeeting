@@ -78,11 +78,19 @@ router.delete('/:id', async (req, res) => {
 });
 
 // 上传录音并转写
+function unlinkUpload(file) {
+  if (file?.path) fs.unlink(file.path, () => {});
+}
+
 router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
   const meeting = await getMeeting(req.params.id);
-  if (!meeting) return res.status(404).json({ error: 'not found' });
+  if (!meeting) {
+    unlinkUpload(req.file);
+    return res.status(404).json({ error: 'not found' });
+  }
   if (!req.file) return res.status(400).json({ error: 'no file' });
   if (!isSupported(req.file.originalname)) {
+    unlinkUpload(req.file);
     return res.status(400).json({ error: `不支持的格式，支持: ${['mp3','wav','ogg','webm','flac','aac','m4a','amr','opus','mp4','mkv','mov'].join(', ')}` });
   }
   const settings = await getSettings();
@@ -112,6 +120,7 @@ router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
       if (!saved) return;
       queue.events.emit('result', { taskId, ok: true, meetingId: meeting.id });
     } catch (err) {
+      await updateMeeting(meeting.id, { status: 'error' });
       queue.events.emit('result', { taskId, ok: false, error: err.message });
     }
   })();

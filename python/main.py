@@ -97,10 +97,25 @@ async def delete_model(model_id: str):
         raise HTTPException(status_code=400, detail=str(e))
 
 
+def _read_uploads_file(file_path: str) -> bytes:
+    data_dir = os.environ.get("MEETING_DATA_DIR")
+    if not data_dir:
+        raise HTTPException(status_code=400, detail="未配置数据目录，拒绝读取本地文件")
+    root = (Path(data_dir) / "uploads").resolve()
+    p = Path(file_path).resolve()
+    try:
+        p.relative_to(root)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="file 仅允许 uploads 目录")
+    if not p.is_file():
+        raise HTTPException(status_code=400, detail="文件不存在")
+    return p.read_bytes()
+
+
 @app.post("/transcribe")
 def transcribe(req: TranscribeReq):
     if req.file:
-        pcm = Path(req.file).read_bytes()
+        pcm = _read_uploads_file(req.file)
     elif req.pcm:
         pcm = base64.b64decode(req.pcm)
     else:

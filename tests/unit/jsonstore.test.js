@@ -60,6 +60,14 @@ test('会议 CRUD 全流程（持久化）', async () => {
   assert.equal(await getMeeting(m.id), null);
 });
 
+test('列表不因缺少 status 丢掉会议', async () => {
+  const m = { id: randomUUID(), title: '无 status', createdAt: Date.now(), updatedAt: Date.now() };
+  await saveMeeting(m);
+  const list = await listMeetings();
+  assert.ok(list.some((x) => x.id === m.id));
+  await deleteMeeting(m.id);
+});
+
 test('置顶排序：pinned 优先', async () => {
   const a = { id: randomUUID(), title: 'A', createdAt: Date.now() - 1000, updatedAt: Date.now() - 1000, status: 'idle' };
   const b = { id: randomUUID(), title: 'B', createdAt: Date.now(), updatedAt: Date.now(), status: 'idle', pinned: true };

@@ -76,7 +76,7 @@ export async function listMeetings() {
   const meetings = await Promise.all(
     files.filter((f) => f.endsWith('.json')).map(async (f) => {
       const m = await readJson(path.join(MEETINGS_DIR, f), null);
-      return m && m.status ? m : null;
+      return m && m.id ? m : null;
     })
   );
   return meetings
@@ -119,9 +119,19 @@ export async function deleteMeeting(id) {
     if (e.code === 'INVALID_MEETING_ID') return;
     throw e;
   }
+  const meeting = await readJson(file, null);
   try {
     await fsp.unlink(file);
   } catch { /* 不存在忽略 */ }
+  const audioRef = meeting?.audioRef;
+  if (!audioRef) return;
+  try {
+    const root = path.resolve(UPLOADS_DIR);
+    const audio = path.resolve(audioRef);
+    const rel = path.relative(root, audio);
+    if (rel.startsWith('..') || path.isAbsolute(rel)) return;
+    await fsp.unlink(audio);
+  } catch { /* 音频不存在或无权删除则忽略 */ }
 }
 
 /* ---------- 设置 ---------- */

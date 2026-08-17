@@ -8,6 +8,7 @@ export default defineConfig({
   // 相对路径：桌面端以 file:// 加载 index.html 时，绝对路径 /assets 会指向文件系统根
   base: './',
   server: {
+    host: '127.0.0.1',
     port: 5173,
     proxy: {
       '/api': 'http://localhost:3000',

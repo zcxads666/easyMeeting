@@ -11,7 +11,10 @@ async function callPython(path, body) {
     signal: AbortSignal.timeout(120000)
   });
   const json = await res.json();
-  if (!res.ok) throw new Error(`本地 ASR 失败: ${json.error || res.statusText}`);
+  if (!res.ok) {
+    const detail = json.detail || json.error || res.statusText;
+    throw new Error(`本地 ASR 失败: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`);
+  }
   return json;
 }
 

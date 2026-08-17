@@ -137,15 +137,6 @@ export default function Settings() {
         </div>
       </section>
 
-      {/* 纠错开关 */}
-      <section className="card p-6 mb-6 flex items-center justify-between">
-        <div>
-          <h2 className="font-semibold">错别字纠正</h2>
-          <p className="text-sm text-gray-400 dark:text-gray-500">转写后自动纠正同音字与口语冗余</p>
-        </div>
-        <Toggle checked={form.correction.enabled} onChange={(v) => set('correction', 'enabled', v)} />
-      </section>
-
       {/* 主题 */}
       <section className="card p-6 mb-6 flex items-center justify-between">
         <div>

@@ -5,7 +5,7 @@ import { accessSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
-import { ROOT, PYTHON_PORT } from '../config.js';
+import { ROOT, PYTHON_PORT, DATA_DIR } from '../config.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -157,7 +157,7 @@ async function launch() {
   startedAtMtime = await pythonCodeMtime();
   child = spawn(pythonBin, ['-u', pyMain], {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, MEETING_PY_PORT: String(pyPort) }
+    env: { ...process.env, MEETING_PY_PORT: String(pyPort), MEETING_DATA_DIR: DATA_DIR }
   });
   child.stdout.on('data', (d) => process.stdout.write(`[python] ${d}`));
   child.stderr.on('data', (d) => process.stderr.write(`[python:err] ${d}`));
