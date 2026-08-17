@@ -61,11 +61,12 @@ router.post('/', async (req, res) => {
   res.json(meeting);
 });
 
-// 更新字段
+// 更新字段（忽略 body.id，禁止改写主键/路径穿越）
 router.patch('/:id', async (req, res) => {
   const m = await getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: 'not found' });
-  const next = { ...m, ...req.body };
+  const { id: _ignored, ...rest } = req.body || {};
+  const next = { ...m, ...rest, id: m.id };
   const saved = await saveMeeting(next);
   res.json(saved);
 });

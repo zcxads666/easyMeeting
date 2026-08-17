@@ -33,6 +33,29 @@ export async function writeJson(file, data) {
 
 /* ---------- 会议仓库 ---------- */
 
+const MEETING_ID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+export function isMeetingId(id) {
+  return typeof id === 'string' && MEETING_ID_RE.test(id);
+}
+
+function meetingFile(id) {
+  if (!isMeetingId(id)) {
+    const err = new Error('invalid meeting id');
+    err.code = 'INVALID_MEETING_ID';
+    throw err;
+  }
+  const root = path.resolve(MEETINGS_DIR);
+  const file = path.resolve(root, `${id}.json`);
+  const rel = path.relative(root, file);
+  if (rel.startsWith('..') || path.isAbsolute(rel)) {
+    const err = new Error('invalid meeting id');
+    err.code = 'INVALID_MEETING_ID';
+    throw err;
+  }
+  return file;
+}
+
 export async function listMeetings() {
   await ensureDirs();
   const files = await fsp.readdir(MEETINGS_DIR).catch(() => []);
@@ -51,18 +74,30 @@ export async function listMeetings() {
 }
 
 export async function getMeeting(id) {
-  return readJson(path.join(MEETINGS_DIR, `${id}.json`), null);
+  try {
+    return await readJson(meetingFile(id), null);
+  } catch (e) {
+    if (e.code === 'INVALID_MEETING_ID') return null;
+    throw e;
+  }
 }
 
 export async function saveMeeting(meeting) {
+  const file = meetingFile(meeting?.id);
   meeting.updatedAt = Date.now();
   await ensureDirs();
-  await writeJson(path.join(MEETINGS_DIR, `${meeting.id}.json`), meeting);
+  await writeJson(file, meeting);
   return meeting;
 }
 
 export async function deleteMeeting(id) {
-  const file = path.join(MEETINGS_DIR, `${id}.json`);
+  let file;
+  try {
+    file = meetingFile(id);
+  } catch (e) {
+    if (e.code === 'INVALID_MEETING_ID') return;
+    throw e;
+  }
   try {
     await fsp.unlink(file);
   } catch { /* 不存在忽略 */ }
