@@ -32,8 +32,11 @@ export default function Meeting() {
   };
 
   useEffect(() => {
+    setMeeting(null);
+    setError('');
+    segmentsRef.current = [];
     connectSocket();
-    api(`/meetings/${id}`).then(setMeeting).catch(() => setError('加载会议失败'));
+    api(`/meetings/${id}`).then(setMeeting).catch(() => setError('会议不存在或加载失败'));
 
     const onPartial = ({ text, meetingId }) => {
       if (meetingId && meetingId !== id) return;
@@ -139,6 +142,14 @@ export default function Meeting() {
     }
   };
 
+  if (!meeting && error) {
+    return (
+      <div className="pt-24 text-center text-gray-400">
+        <p>{error}</p>
+        <Link to="/" className="text-apple-blue text-sm mt-3 inline-block">返回列表</Link>
+      </div>
+    );
+  }
   if (!meeting) return <div className="pt-24 text-center text-gray-400">加载中…</div>;
 
   return (
@@ -148,8 +159,8 @@ export default function Meeting() {
         <input
           className="input flex-1 font-semibold text-lg"
           value={meeting.title}
-          onChange={(e) => {
-            setMeeting((m) => ({ ...m, title: e.target.value }));
+          onChange={(e) => setMeeting((m) => ({ ...m, title: e.target.value }))}
+          onBlur={(e) => {
             api(`/meetings/${id}`, { method: 'PATCH', body: { title: e.target.value } }).catch(() => {});
           }}
         />

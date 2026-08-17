@@ -55,7 +55,7 @@ router.post('/', async (req, res) => {
     rawText: '',
     corrected: '',
     summary: null,
-    status: 'recording'
+    status: 'idle'
   };
   await saveMeeting(meeting);
   res.json(meeting);

@@ -4,6 +4,7 @@ import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import fsp from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
 import { ROOT } from '../../server/config.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -13,6 +14,7 @@ const API_TOKEN = 'sys-test-token';
 
 let child = null;
 const TEST_DATA_DIR = path.join('/tmp', `meeting-sys-test-${Date.now()}`);
+const TEST_MODELS_DIR = path.join('/tmp', `meeting-sys-models-${Date.now()}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitHealthy(timeoutMs = 15000) {
@@ -30,7 +32,13 @@ async function waitHealthy(timeoutMs = 15000) {
 before(async () => {
   child = spawn(process.execPath, ['server/index.js'], {
     cwd: ROOT,
-    env: { ...process.env, PORT: String(PORT), MEETING_DATA_DIR: TEST_DATA_DIR, MEETING_API_TOKEN: API_TOKEN },
+    env: {
+      ...process.env,
+      PORT: String(PORT),
+      MEETING_DATA_DIR: TEST_DATA_DIR,
+      MEETING_MODELS_DIR: TEST_MODELS_DIR,
+      MEETING_API_TOKEN: API_TOKEN
+    },
     stdio: ['ignore', 'pipe', 'pipe']
   });
   child.stdout.on('data', (d) => process.stdout.write(`[srv] ${d}`));
@@ -42,6 +50,7 @@ after(async () => {
   if (child) { child.kill(); child = null; }
   await sleep(300);
   await fsp.rm(TEST_DATA_DIR, { recursive: true, force: true });
+  await fsp.rm(TEST_MODELS_DIR, { recursive: true, force: true });
 });
 
 async function api(method, url, body) {
@@ -61,7 +70,7 @@ test('验收1a: 新建会议 → 持久化 → 重启不丢失', async () => {
   const { res, data: m } = await api('POST', '/api/meetings', { title: '系统测试会议' });
   assert.equal(res.status, 200);
   assert.ok(m.id);
-  assert.equal(m.status, 'recording');
+  assert.equal(m.status, 'idle');
   assert.equal(m.source, 'realtime');
   assert.deepEqual(m.segments, []);
 
@@ -162,18 +171,30 @@ test('验收2: 设置读写 + provider 切换持久化', async () => {
   await api('PATCH', '/api/settings', { asr: { provider: 'qwen' } });
 });
 
-test('验收3: 模型代理路由（Python 未启动时优雅 502，启动后正常代理）', async () => {
-  // 路由可达、不崩溃即可：Python 未启动返回 502；
-  // 已启动时按真实模型状态返回 200（成功）/ 400（未安装/不存在）
-  const ACCEPT = [200, 400, 502];
-  const { res } = await api('GET', '/api/models');
-  assert.ok(ACCEPT.includes(res.status), `models 状态 ${res.status}`);
-  const { res: r2 } = await api('POST', '/api/models/download', { id: 'whisper-tiny' });
-  assert.ok(ACCEPT.includes(r2.status), `download 状态 ${r2.status}`);
-  const { res: r3 } = await api('POST', '/api/models/switch', { id: 'whisper-tiny' });
-  assert.ok(ACCEPT.includes(r3.status), `switch 状态 ${r3.status}`);
-  const { res: r4 } = await api('DELETE', '/api/models/whisper-tiny');
-  assert.ok(ACCEPT.includes(r4.status), `delete 状态 ${r4.status}`);
+test('验收3: 模型代理路由（不下载真实模型）', async () => {
+  const { res, data } = await api('GET', '/api/models');
+  if (res.status === 502) {
+    assert.match(String(data.error || ''), /未启动|推理/);
+    return;
+  }
+  assert.equal(res.status, 200);
+  assert.ok(Array.isArray(data.models));
+  assert.ok(data.models.some((m) => m.id === 'Qwen/Qwen3-ASR-0.6B'));
+
+  const { res: r2, data: d2 } = await api('POST', '/api/models/download', { id: 'not-a-real-model' });
+  assert.equal(r2.status, 400);
+  assert.match(JSON.stringify(d2), /未知模型/);
+
+  const { res: r3, data: d3 } = await api('DELETE', '/api/models/Qwen/NotARealModel-0.0B');
+  assert.notEqual(r3.status, 404, `斜杠 id 应匹配删除路由, got ${r3.status}`);
+  assert.equal(r3.status, 400);
+  assert.match(JSON.stringify(d3), /不存在|未知/);
+});
+
+test('未知会议 GET 返回 404', async () => {
+  const { res, data } = await api('GET', `/api/meetings/${randomUUID()}`);
+  assert.equal(res.status, 404);
+  assert.ok(data.error);
 });
 
 test('验收4a: LLM 未配置时全部端点返回 400 不崩溃', async () => {

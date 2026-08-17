@@ -2,7 +2,6 @@ import { useEffect, useRef, useState } from 'react';
 import { Link, useParams } from 'react-router-dom';
 import { api } from '../api';
 import { BASE_URL, API_TOKEN } from '../env';
-import { BASE_URL } from '../env';
 
 export default function Summary() {
   const { id } = useParams();
@@ -20,10 +19,13 @@ export default function Summary() {
   const streamRef = useRef(null);
 
   useEffect(() => {
+    setMeeting(null);
+    setSummary(null);
+    setError('');
     api(`/meetings/${id}`).then((m) => {
       setMeeting(m);
       setSummary(m.summary);
-    }).catch(() => setError('加载失败'));
+    }).catch(() => setError('会议不存在或加载失败'));
   }, [id]);
 
   const generateSummary = async () => {
@@ -141,6 +143,14 @@ export default function Summary() {
     navigator.clipboard.writeText(buildMarkdown(meeting, summary));
   };
 
+  if (!meeting && error) {
+    return (
+      <div className="pt-24 text-center text-gray-400">
+        <p>{error}</p>
+        <Link to="/" className="text-apple-blue text-sm mt-3 inline-block">返回列表</Link>
+      </div>
+    );
+  }
   if (!meeting) return <div className="pt-24 text-center text-gray-400">加载中…</div>;
   const displayText = meeting.corrected || meeting.rawText;
   const showStream = generating && streamText;

@@ -1,34 +1,25 @@
+/* \u4f5c\u8005\uff1a\u9648\u661f\u5408 */
 import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { DATA_DIR, SETTINGS_FILE, DEFAULT_SETTINGS } from '../../server/config.js';
-import {
+import { makeTestDirs, rmTestDirs } from '../helpers/tempdir.js';
+
+const { dataDir, modelsDir } = makeTestDirs();
+
+const { DATA_DIR, SETTINGS_FILE, DEFAULT_SETTINGS } = await import('../../server/config.js');
+const {
   ensureDirs, getMeeting, saveMeeting, deleteMeeting,
   listMeetings, getSettings, saveSettings, writeJson, readJson
-} from '../../server/services/store/jsonstore.js';
-
-// 备份原始 data 目录，测试后恢复
-let backupDir = null;
+} = await import('../../server/services/store/jsonstore.js');
 
 before(async () => {
-  try {
-    await fsp.access(DATA_DIR);
-    backupDir = path.join('/tmp', `meeting-data-backup-${Date.now()}`);
-    await fsp.cp(DATA_DIR, backupDir, { recursive: true });
-    // 清空运行数据，保证测试从干净状态开始
-    await fsp.rm(DATA_DIR, { recursive: true, force: true });
-  } catch { backupDir = null; }
+  await ensureDirs();
 });
 
 after(async () => {
-  await fsp.rm(DATA_DIR, { recursive: true, force: true });
-  if (backupDir) {
-    await fsp.mkdir(path.dirname(DATA_DIR), { recursive: true });
-    await fsp.cp(backupDir, DATA_DIR, { recursive: true });
-    await fsp.rm(backupDir, { recursive: true, force: true });
-  }
+  await rmTestDirs(dataDir, modelsDir);
 });
 
 test('ensureDirs 创建数据目录', async () => {
@@ -47,35 +38,31 @@ test('会议 CRUD 全流程（持久化）', async () => {
     source: 'realtime',
     segments: [{ start: 0, end: 1000, text: '测试' }],
     rawText: '测试',
-    status: 'recording'
+    status: 'idle'
   };
   await saveMeeting(m);
 
-  // 重新读取（模拟重启）
   const loaded = await getMeeting(m.id);
   assert.equal(loaded.title, '单元测试会议');
   assert.equal(loaded.segments.length, 1);
   assert.equal(loaded.segments[0].text, '测试');
 
-  // 列表包含
   const list = await listMeetings();
   assert.ok(list.some((x) => x.id === m.id));
 
-  // 更新
   m.status = 'summarized';
   await saveMeeting(m);
   const updated = await getMeeting(m.id);
   assert.equal(updated.status, 'summarized');
   assert.ok(updated.updatedAt >= m.updatedAt);
 
-  // 删除
   await deleteMeeting(m.id);
   assert.equal(await getMeeting(m.id), null);
 });
 
 test('置顶排序：pinned 优先', async () => {
-  const a = { id: randomUUID(), title: 'A', createdAt: Date.now() - 1000, updatedAt: Date.now() - 1000, status: 'recording' };
-  const b = { id: randomUUID(), title: 'B', createdAt: Date.now(), updatedAt: Date.now(), status: 'recording', pinned: true };
+  const a = { id: randomUUID(), title: 'A', createdAt: Date.now() - 1000, updatedAt: Date.now() - 1000, status: 'idle' };
+  const b = { id: randomUUID(), title: 'B', createdAt: Date.now(), updatedAt: Date.now(), status: 'idle', pinned: true };
   await saveMeeting(a);
   await saveMeeting(b);
   const list = await listMeetings();
@@ -99,15 +86,12 @@ test('设置：默认值与合并', async () => {
   assert.equal(defaults.asr.provider, 'qwen');
   assert.deepEqual(defaults.asr.local, DEFAULT_SETTINGS.asr.local);
 
-  // 部分更新
   const saved = await saveSettings({ llm: { model: 'gpt-test' }, asr: { provider: 'local' } });
   assert.equal(saved.llm.model, 'gpt-test');
   assert.equal(saved.asr.provider, 'local');
-  // 未更新字段保留默认
   assert.equal(saved.llm.baseUrl, DEFAULT_SETTINGS.llm.baseUrl);
   assert.equal(saved.asr.local.engine, 'whisper');
 
-  // 重启后持久化（重新读取文件）
   const reloaded = await getSettings();
   assert.equal(reloaded.llm.model, 'gpt-test');
   assert.equal(reloaded.asr.provider, 'local');

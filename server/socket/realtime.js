@@ -11,6 +11,8 @@ export function setupRealtime(io, createStream = defaultCreateStream) {
         const settings = await getSettings();
         const meeting = await getMeeting(meetingId);
         if (!meeting) return socket.emit('rt:error', { error: '会议不存在' });
+        meeting.status = 'recording';
+        await saveMeeting(meeting);
 
         const stream = createStream(settings.asr.provider, settings);
         const session = {

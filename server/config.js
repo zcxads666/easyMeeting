@@ -14,7 +14,9 @@ export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 export const TRASH_DIR = path.join(DATA_DIR, 'trash');
 export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 
-export const MODELS_DIR = path.join(os.homedir(), '.meeting', 'models');
+export const MODELS_DIR = process.env.MEETING_MODELS_DIR
+  ? path.resolve(process.env.MEETING_MODELS_DIR)
+  : path.join(os.homedir(), '.meeting', 'models');
 
 // 推理服务默认端口（运行时可能被占用自动更换，见 services/python.js）
 export const PYTHON_PORT = Number(process.env.MEETING_PY_PORT) || 8300;

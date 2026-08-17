@@ -77,7 +77,14 @@ export default function Home() {
           <ul className="grid gap-4 sm:grid-cols-2">
             {filtered.map((m) => (
               <li key={m.id}>
-                <MeetingCard meeting={m} onDelete={() => deleteMeeting(m.id)} onPin={(e) => togglePin(m, e)} />
+                <MeetingCard
+                  meeting={m}
+                  onDelete={() => {
+                    if (!confirm('确定删除该会议？')) return;
+                    deleteMeeting(m.id);
+                  }}
+                  onPin={(e) => togglePin(m, e)}
+                />
               </li>
             ))}
           </ul>
@@ -88,9 +95,11 @@ export default function Home() {
 }
 
 const STATUS_MAP = {
+  idle: '待开始',
   recording: '记录中',
   transcribed: '已转写',
-  summarized: '已总结'
+  summarized: '已总结',
+  error: '失败'
 };
 const STATUS_COLOR = {
   recording: 'bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400',
