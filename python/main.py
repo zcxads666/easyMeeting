@@ -54,8 +54,6 @@ def download_status():
 
 def _do_download(model_id: str):
     try:
-        with _download_lock:
-            _download_status[model_id] = {"status": "downloading", "progress": 0, "started": time.time()}
         model_manager.download(model_id)
         with _download_lock:
             _download_status[model_id] = {"status": "completed", "progress": 100}
@@ -66,15 +64,19 @@ def _do_download(model_id: str):
 
 @app.post("/models/download")
 async def download(req: DownloadReq):
+    if req.id not in model_manager.known_ids():
+        with _download_lock:
+            _download_status[req.id] = {"status": "failed", "error": f"未知模型: {req.id}"}
+        raise HTTPException(status_code=400, detail=f"未知模型: {req.id}")
     with _download_lock:
         existing = _download_status.get(req.id)
         if existing and existing.get("status") == "downloading":
             return {"ok": True, "id": req.id, "status": "already_downloading"}
-    # 在后台线程中执行下载
+        if existing and existing.get("status") == "completed":
+            return {"ok": True, "id": req.id, "status": "completed"}
+        _download_status[req.id] = {"status": "downloading", "progress": 0, "started": time.time()}
     t = threading.Thread(target=_do_download, args=(req.id,), daemon=True)
     t.start()
-    with _download_lock:
-        _download_status[req.id] = {"status": "downloading", "progress": 0, "started": time.time()}
     return {"ok": True, "id": req.id, "status": "downloading"}
 
 
@@ -87,7 +89,7 @@ async def switch_model(req: SwitchReq):
         raise HTTPException(status_code=400, detail=str(e))
 
 
-@app.delete("/models/{model_id}")
+@app.delete("/models/{model_id:path}")
 async def delete_model(model_id: str):
     try:
         return model_manager.delete(model_id)

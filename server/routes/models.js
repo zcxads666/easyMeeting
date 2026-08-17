@@ -44,6 +44,10 @@ router.get('/', (req, res) => proxy('/models', req, res, { fresh: true }));
 router.get('/download/status', (req, res) => proxy('/models/download/status', req, res, { fresh: true }));
 router.post('/download', (req, res) => proxy('/models/download', req, res));
 router.post('/switch', (req, res) => proxy('/models/switch', req, res));
-router.delete('/:id', (req, res) => proxy(`/models/${encodeURIComponent(req.params.id)}`, req, res));
+router.delete(/^\/(.+)$/, (req, res) => {
+  const id = req.params[0];
+  if (!id) return res.status(404).json({ error: 'not found' });
+  return proxy(`/models/${encodeURIComponent(id)}`, req, res);
+});
 
 export default router;

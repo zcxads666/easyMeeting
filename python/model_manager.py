@@ -9,7 +9,7 @@ MODELS_DIR = Path(os.environ.get("MEETING_MODELS_DIR", Path.home() / ".meeting" 
 
 # 可管理的本地模型目录
 WHISPER_SIZES = ["tiny", "base", "small", "medium", "large-v3"]
-QWEN_MODELS = ["Qwen/Qwen3-ASR-Flash", "Qwen/Qwen3-ASR-Flash-FileTrans"]
+QWEN_MODELS = ["Qwen/Qwen3-ASR-0.6B", "Qwen/Qwen3-ASR-1.7B"]
 
 DEFAULT_SOURCE = os.environ.get("MEETING_MODEL_SOURCE", "modelscope")  # modelscope | huggingface
 
@@ -20,8 +20,8 @@ REFERENCE_SIZES_GB = {
     "whisper-small": 0.5,
     "whisper-medium": 1.5,
     "whisper-large-v3": 3.0,
-    "Qwen/Qwen3-ASR-Flash": 2.5,
-    "Qwen/Qwen3-ASR-Flash-FileTrans": 2.5,
+    "Qwen/Qwen3-ASR-0.6B": 1.2,
+    "Qwen/Qwen3-ASR-1.7B": 3.4,
 }
 
 
@@ -150,6 +150,10 @@ def download_qwen(model_id, progress_cb=None):
     from modelscope import snapshot_download as ms_download
     ms_download(model_id, local_dir=str(dest))
     return dest
+
+
+def known_ids():
+    return [f"whisper-{s}" for s in WHISPER_SIZES] + list(QWEN_MODELS)
 
 
 def download(id, progress_cb=None):
