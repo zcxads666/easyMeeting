@@ -1,6 +1,7 @@
 import fs from 'node:fs';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { randomBytes } from 'node:crypto';
 import {
   DATA_DIR, MEETINGS_DIR, UPLOADS_DIR, TRASH_DIR, SETTINGS_FILE, DEFAULT_SETTINGS
 } from '../../config.js';
@@ -12,12 +13,23 @@ export function ensureDirs() {
   }
 }
 
+const writeLocks = new Map();
+
+function withFileLock(file, fn) {
+  const prev = writeLocks.get(file) || Promise.resolve();
+  const next = prev.then(fn, fn);
+  writeLocks.set(file, next.catch(() => {}));
+  return next;
+}
+
 async function atomicWrite(file, data) {
-  const tmp = `${file}.${process.pid}.tmp`;
-  await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
-  await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
-  await fsp.rename(tmp, file);
-  try { await fsp.chmod(file, 0o600); } catch { /* 非 POSIX 忽略 */ }
+  return withFileLock(file, async () => {
+    const tmp = `${file}.${process.pid}.${randomBytes(8).toString('hex')}.tmp`;
+    await fsp.mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+    await fsp.writeFile(tmp, JSON.stringify(data, null, 2), { encoding: 'utf8', mode: 0o600 });
+    await fsp.rename(tmp, file);
+    try { await fsp.chmod(file, 0o600); } catch { /* 非 POSIX 忽略 */ }
+  });
 }
 
 export async function readJson(file, fallback) {
@@ -92,6 +104,13 @@ export async function saveMeeting(meeting) {
   return meeting;
 }
 
+export async function updateMeeting(id, fields) {
+  const latest = await getMeeting(id);
+  if (!latest) return null;
+  Object.assign(latest, fields);
+  return saveMeeting(latest);
+}
+
 export async function deleteMeeting(id) {
   let file;
   try {
@@ -109,7 +128,20 @@ export async function deleteMeeting(id) {
 
 export async function getSettings() {
   await ensureDirs();
-  const saved = await readJson(SETTINGS_FILE, {});
+  let saved = {};
+  try {
+    const raw = await fsp.readFile(SETTINGS_FILE, 'utf8');
+    try {
+      saved = JSON.parse(raw);
+    } catch {
+      const err = new Error('settings.json 损坏，已拒绝用默认值覆盖');
+      err.code = 'SETTINGS_CORRUPT';
+      throw err;
+    }
+  } catch (e) {
+    if (e.code === 'SETTINGS_CORRUPT') throw e;
+    if (e.code !== 'ENOENT') throw e;
+  }
   return {
     ...structuredClone(DEFAULT_SETTINGS),
     ...saved,

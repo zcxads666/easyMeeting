@@ -9,17 +9,43 @@ import { localTest } from '../services/asr/local.js';
 const router = Router();
 router.use(json());
 
+function mergeForTest(current, patch) {
+  return {
+    ...current,
+    ...patch,
+    llm: { ...current.llm, ...(patch.llm || {}) },
+    asr: {
+      ...current.asr,
+      ...(patch.asr || {}),
+      qwen: { ...current.asr.qwen, ...(patch.asr?.qwen || {}) },
+      volc: { ...current.asr.volc, ...(patch.asr?.volc || {}) },
+      mimo: { ...current.asr.mimo, ...(patch.asr?.mimo || {}) },
+      local: { ...current.asr.local, ...(patch.asr?.local || {}) }
+    }
+  };
+}
+
 router.get('/', async (_req, res) => {
-  res.json(redactSettings(await getSettings()));
+  try {
+    res.json(redactSettings(await getSettings()));
+  } catch (e) {
+    if (e.code === 'SETTINGS_CORRUPT') return res.status(500).json({ error: e.message });
+    throw e;
+  }
 });
 
 router.patch('/', async (req, res) => {
-  res.json(redactSettings(await saveSettings(req.body)));
+  try {
+    res.json(redactSettings(await saveSettings(req.body)));
+  } catch (e) {
+    if (e.code === 'SETTINGS_CORRUPT') return res.status(500).json({ error: e.message });
+    throw e;
+  }
 });
 
 // 测试 LLM 可达性
 router.post('/llm/test', async (req, res) => {
-  const settings = await saveSettings(req.body || {});
+  const settings = mergeForTest(await getSettings(), req.body || {});
   try {
     await test(settings);
     res.json({ ok: true, message: 'LLM 连接成功' });
@@ -28,9 +54,8 @@ router.post('/llm/test', async (req, res) => {
   }
 });
 
-// 测试当前 ASR provider 可用性（云端鉴权 / 本地服务与模型）
 router.post('/asr/test', async (req, res) => {
-  const settings = await saveSettings(req.body || {});
+  const settings = mergeForTest(await getSettings(), req.body || {});
   try {
     const provider = settings.asr.provider;
     const tests = { qwen: qwenTest, volc: volcTest, mimo: mimoTest, local: localTest };

@@ -4,7 +4,7 @@ import fs from 'node:fs';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import {
-  listMeetings, getMeeting, saveMeeting, deleteMeeting
+  listMeetings, getMeeting, saveMeeting, deleteMeeting, updateMeeting
 } from '../services/store/jsonstore.js';
 import { isSupported, probe } from '../services/audio/ffmpeg.js';
 import { transcribeFile } from '../services/asr/index.js';
@@ -101,13 +101,15 @@ router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
       }, settings);
       queue.progress(taskId, { stage: 'saving', percent: 90 });
       queue.progress(taskId, { stage: 'done', percent: 100 });
-      meeting.source = 'file';
-      meeting.audioRef = req.file.path;
-      meeting.rawText = result.text;
-      meeting.segments = result.segments;
-      meeting.duration = Number(info.format?.duration) || 0;
-      meeting.status = 'transcribed';
-      await saveMeeting(meeting);
+      const saved = await updateMeeting(meeting.id, {
+        source: 'file',
+        audioRef: req.file.path,
+        rawText: result.text,
+        segments: result.segments,
+        duration: Number(info.format?.duration) || 0,
+        status: 'transcribed'
+      });
+      if (!saved) return;
       queue.events.emit('result', { taskId, ok: true, meetingId: meeting.id });
     } catch (err) {
       queue.events.emit('result', { taskId, ok: false, error: err.message });
