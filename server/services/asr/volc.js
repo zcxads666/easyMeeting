@@ -1,191 +1,221 @@
-import { transcodeToPcm } from '../audio/ffmpeg.js';
+import { randomUUID } from 'node:crypto';
+import fsp from 'node:fs/promises';
+import zlib from 'node:zlib';
+import { promisify } from 'node:util';
 
-/* 火山引擎语音识别：WebSocket 二进制流协议（2-bit 帧） */
-// 鉴权：POST 鉴权接口取临时 token，再建立 wss 连接发送首帧(appid, token)
+const gzip = promisify(zlib.gzip);
+const gunzip = promisify(zlib.gunzip);
 
-const AUTH_URL = 'https://openspeech.bytedance.com/api/v3/auth';
-const WS_URL = 'wss://openspeech.bytedance.com/api/v3/auc/apitranscribe';
+/** 现行：录音文件极速识别 HTTP（官方 2026 文档） */
+export const VOLC_FLASH_URL = 'https://openspeech.bytedance.com/api/v3/auc/bigmodel/recognize/flash';
+/** 现行：大模型流式识别 WebSocket */
+export const VOLC_SAUC_WS = 'wss://openspeech.bytedance.com/api/v3/sauc/bigmodel';
 
-function buildHeader(appid, token, cluster) {
-  const header = {
-    app: { appid, cluster, token: 'access_token' },
-    user: { uid: 'meeting-notes' },
+function volcHeaders(appid, token, resourceId) {
+  return {
+    'X-Api-App-Key': String(appid),
+    'X-Api-Access-Key': String(token),
+    'X-Api-Resource-Id': resourceId,
+    'X-Api-Request-Id': randomUUID(),
+    'X-Api-Sequence': '-1'
   };
-  return stringifyHeader(header, token);
 }
 
-// 简化：火山首帧需 base64(JSON(前端4字段) + 后端4字段) 并带 token 到 auth 字段
-function stringifyHeader(header, token) {
-  header.auth = { token };
-  return base64Encode(JSON.stringify({
-    app: header.app,
-    user: header.user,
-    audio: { format: 'pcm', rate: 16000, bits: 16, channel: 1, codec: 'raw' },
-    request: { model_name: 'bigmodel', enable_itn: true, show_utterances: true },
-    auth: header.auth
-  }));
+function silenceWav() {
+  return Buffer.concat([
+    Buffer.from('RIFF'), Buffer.from([36 + 1600, 0, 0, 0]), Buffer.from('WAVE'),
+    Buffer.from('fmt '), Buffer.from([16, 0, 0, 0]), Buffer.from([1, 0]), Buffer.from([1, 0]),
+    Buffer.from([0x40, 0x1f, 0, 0]), Buffer.from([0x80, 0x3e, 0, 0]),
+    Buffer.from([2, 0]), Buffer.from([16, 0]),
+    Buffer.from('data'), Buffer.from([0x40, 0x06, 0, 0]),
+    Buffer.alloc(1600)
+  ]);
 }
 
-function base64Encode(str) {
-  return Buffer.from(str, 'utf8').toString('base64');
-}
-
-async function getAppToken(appid, accessToken) {
-  const res = await fetch(AUTH_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ appid, access_token: accessToken })
-  });
-  const json = await res.json();
-  if (json.code !== 0) throw new Error(`火山鉴权失败: ${json.message}`);
-  return json.data?.access_token || json.data?.token;
-}
-
-function parseResult(text) {
-  // 火山返回 JSON 文本，含 utterances[]
-  try {
-    const data = JSON.parse(text);
-    const segments = (data.result?.utterances || data.utterances || []).map((u) => ({
-      start: (u.start_time ?? 0) * 1,
-      end: (u.end_time ?? 0) * 1,
-      speaker: u.speaker || undefined,
-      text: (u.text || '').trim()
-    }));
-    const fullText = segments.map((s) => s.text).join('\n');
-    return { segments, text: fullText || data.result?.text || '' };
-  } catch {
-    return { segments: [], text };
-  }
-}
-
-/* ---- 文件转写：通过流式 WS 发送完整音频 ---- */
 export async function volcFileTranscribe({ filePath }, settings) {
-  const { appid, token, cluster } = settings.asr.volc;
+  const { appid, token } = settings.asr.volc;
   if (!appid || !token) throw new Error('未配置火山 appid/token');
-  const accessToken = await getAppToken(appid, token);
-  const pcmPath = await transcodeToPcm(filePath, `volc_${Date.now()}.pcm`);
-  const { default: WebSocket } = await import('ws');
-  const { readFile } = await import('node:fs/promises');
-
-  const pcm = await readFile(pcmPath);
-  const delay = new Promise((resolve) => {
-    const ws = new WebSocket(WS_URL, { headers: { Authorization: `Bearer; ${accessToken}` } });
-    let headerSent = false;
-    let resultText = '';
-    ws.on('open', () => {
-      ws.send(stringifyHeader({ appid, token, cluster }, accessToken));
-      headerSent = true;
-    });
-    ws.on('error', resolve);
-    ws.on('message', (data) => {
-      const buf = Buffer.from(data);
-      // 简化：按文本/JSON 解析最后一帧
-      resultText += buf.toString('utf8');
-    });
-    ws.on('close', () => resolve(resultText));
-    // 发送音频（此处简化：整块发送，真实应分帧）
-    const sendAudio = () => {
-      if (!headerSent) { setTimeout(sendAudio, 50); return; }
-      // 2-bit 帧：0x00 为音频帧
-      const frame = Buffer.concat([Buffer.from([0x00]), pcm]);
-      // 分块以免超大
-      const CHUNK = 64 * 1024;
-      let i = 0;
-      const timer = setInterval(() => {
-        const end = Math.min(i + CHUNK, frame.length);
-        ws.send(frame.subarray(i, end));
-        i = end;
-        if (i >= frame.length) {
-          clearInterval(timer);
-          ws.send(Buffer.from([0x02])); // 结束帧
-          setTimeout(() => ws.close(), 500);
-        }
-      }, 100);
-    };
-    sendAudio();
-    setTimeout(() => {
-      try { ws.close(); } catch {}
-      resolve(resultText);
-    }, 120000); // 兜底
+  const raw = await fsp.readFile(filePath);
+  const res = await fetch(VOLC_FLASH_URL, {
+    method: 'POST',
+    headers: {
+      ...volcHeaders(appid, token, 'volc.bigasr.auc_turbo'),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      user: { uid: String(appid) },
+      audio: { data: raw.toString('base64') },
+      request: { model_name: 'bigmodel', enable_itn: true, show_utterances: true }
+    })
   });
-  const text = await delay;
-  return normalize(text);
+  return parseFlashResult(res);
 }
 
-function normalize(text) {
-  if (typeof text !== 'string') {
-    return { segments: [], text: String(text?.message || text || '') };
+async function parseFlashResult(res) {
+  const json = await res.json().catch(() => ({}));
+  const code = res.headers.get?.('X-Api-Status-Code') || '';
+  const msg = res.headers.get?.('X-Api-Message') || json.message || json.error || '';
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`火山鉴权失败: ${res.status} ${msg}`.trim());
   }
-  // 尝试解析 JSON 帧
-  const jsonMatches = text.match(/\{.*\}/g);
-  if (jsonMatches) {
-    let last = null;
-    for (const m of jsonMatches) {
-      try { last = JSON.parse(m); } catch {}
-    }
-    if (last && last.result) {
-      const segments = (last.result.utterances || []).map((u) => ({
-        start: (u.start_time ?? 0) * 1, end: (u.end_time ?? 0) * 1,
-        speaker: u.speaker, text: (u.text || '').trim()
-      }));
-      return { segments, text: segments.map((s) => s.text).join('\n') };
-    }
+  if (res.status === 404) throw new Error('火山 ASR 端点不可用（404）');
+  if (!res.ok) throw new Error(`火山转写失败: HTTP ${res.status} ${msg || JSON.stringify(json)}`);
+  if (code && code !== '20000000' && code !== '20000003') {
+    throw new Error(`火山转写失败: ${code} ${msg}`);
   }
-  return { segments: [], text };
+  const text = json.result?.text || '';
+  const segments = (json.result?.utterances || []).map((u) => ({
+    start: u.start_time ?? 0,
+    end: u.end_time ?? 0,
+    speaker: u.speaker,
+    text: (u.text || '').trim()
+  })).filter((s) => s.text);
+  if (!text && !segments.length && code !== '20000003') {
+    throw new Error(`火山转写失败: 空结果 ${msg || JSON.stringify(json)}`);
+  }
+  return { segments, text: text || segments.map((s) => s.text).join('\n') };
 }
 
-/* ---- 实时：WS 二进制流 ---- */
+function buildWsHeader(messageType, flags, serialization, compression) {
+  const buf = Buffer.alloc(4);
+  buf[0] = 0x11;
+  buf[1] = (messageType << 4) | flags;
+  buf[2] = (serialization << 4) | compression;
+  buf[3] = 0;
+  return buf;
+}
+
+async function packJsonRequest(obj) {
+  const payload = await gzip(Buffer.from(JSON.stringify(obj)));
+  const size = Buffer.alloc(4);
+  size.writeUInt32BE(payload.length);
+  return Buffer.concat([buildWsHeader(0x1, 0, 0x1, 0x1), size, payload]);
+}
+
+async function packAudio(pcm, last) {
+  const payload = await gzip(pcm);
+  const size = Buffer.alloc(4);
+  size.writeUInt32BE(payload.length);
+  return Buffer.concat([buildWsHeader(0x2, last ? 0x2 : 0, 0, 0x1), size, payload]);
+}
+
+async function parseWsFrame(buf) {
+  if (!buf || buf.length < 8) return null;
+  const headerSize = (buf[0] & 0x0f) * 4;
+  const msgType = buf[1] >> 4;
+  const flags = buf[1] & 0x0f;
+  const compress = buf[2] & 0x0f;
+  let offset = headerSize;
+  if (flags === 0x1 || flags === 0x3) offset += 4;
+  if (msgType === 0xf) offset += 4;
+  if (offset + 4 > buf.length) return null;
+  const payloadSize = buf.readUInt32BE(offset);
+  offset += 4;
+  let payload = buf.subarray(offset, offset + payloadSize);
+  if (compress === 1 && payload.length) payload = await gunzip(payload);
+  const text = payload.toString('utf8');
+  try { return { msgType, json: JSON.parse(text) }; } catch { return { msgType, text }; }
+}
+
 export function volcRealtime(settings) {
-  const { appid, token, cluster } = settings.asr.volc;
+  const { appid, token } = settings.asr.volc;
   if (!appid || !token) throw new Error('未配置火山 appid/token');
-  let ws = null, accessToken = '';
+  let ws = null;
   const emitMap = new Map();
   const emit = (n, d) => (emitMap.get(n) || []).forEach((fn) => fn(d));
 
   return {
     on(evt, fn) { emitMap.set(evt, [...(emitMap.get(evt) || []), fn]); },
     async start() {
-      try {
-      accessToken = await getAppToken(appid, token);
       const { default: WebSocket } = await import('ws');
-      ws = new WebSocket(WS_URL, { headers: { Authorization: `Bearer; ${accessToken}` } });
-      ws.on('open', () => {
-        ws.send(stringifyHeader({ appid, token, cluster }, accessToken));
-        emit('open', {});
-      });
-      ws.on('message', (data) => {
-        const buf = Buffer.from(data);
-        const text = buf.toString('utf8');
-        try {
-          const json = JSON.parse(text);
-          if (json.result) {
-            const segs = (json.result.utterances || []).map((u) => u.text).join('');
-            if (segs) emit('partial', { text: segs });
+      return new Promise((resolve, reject) => {
+        let settled = false;
+        const done = (err) => {
+          if (settled) return;
+          settled = true;
+          if (err) reject(err);
+          else resolve();
+        };
+        ws = new WebSocket(VOLC_SAUC_WS, {
+          headers: volcHeaders(appid, token, 'volc.bigasr.sauc.duration')
+        });
+        ws.on('open', async () => {
+          try {
+            ws.send(await packJsonRequest({
+              user: { uid: String(appid) },
+              audio: { format: 'pcm', rate: 16000, bits: 16, channel: 1, codec: 'raw' },
+              request: { model_name: 'bigmodel', enable_itn: true, show_utterances: true }
+            }));
+            emit('open', {});
+            done();
+          } catch (e) {
+            emit('error', e);
+            done(e);
           }
-        } catch {}
+        });
+        ws.on('message', async (data) => {
+          try {
+            const parsed = await parseWsFrame(Buffer.from(data));
+            const json = parsed?.json;
+            if (parsed?.msgType === 0xf) {
+              emit('error', new Error(json?.error || json?.message || '火山流式识别失败'));
+              return;
+            }
+            const result = json?.result || json;
+            const segs = (result?.utterances || []).map((u) => u.text).join('');
+            const text = result?.text || segs;
+            if (text) {
+              const definite = result?.utterances?.some((u) => u.definite) || result?.is_end;
+              emit(definite ? 'final' : 'partial', { text });
+            }
+          } catch {}
+        });
+        ws.on('error', (e) => {
+          emit('error', e);
+          done(e);
+        });
+        ws.on('close', () => emit('close', {}));
       });
-      ws.on('error', (e) => emit('error', e));
-      ws.on('close', () => emit('close', {}));
-      } catch (e) { emit('error', e); }
     },
     send(chunk) {
       if (ws && ws.readyState === 1) {
-        const frame = Buffer.concat([Buffer.from([0x00]), Buffer.from(chunk)]);
-        ws.send(frame);
+        packAudio(Buffer.from(chunk), false).then((buf) => ws.send(buf)).catch((e) => emit('error', e));
       }
     },
     async stop() {
-      if (ws && ws.readyState === 1) ws.send(Buffer.from([0x02]));
+      if (ws && ws.readyState === 1) {
+        try { ws.send(await packAudio(Buffer.alloc(0), true)); } catch {}
+      }
     },
     close() { try { ws?.close(); } catch {} }
   };
 }
-/* ---------------- 火山 ---------------- */
 
-// 轻量可用性验证：走鉴权接口获取临时 token
 export async function volcTest(settings) {
   const { appid, token } = settings.asr.volc;
   if (!appid || !token) throw new Error('未配置火山 appid/token');
-  await getAppToken(appid, token);
-  return '火山鉴权通过，临时 token 获取成功';
+  const res = await fetch(VOLC_FLASH_URL, {
+    method: 'POST',
+    headers: {
+      ...volcHeaders(appid, token, 'volc.bigasr.auc_turbo'),
+      'Content-Type': 'application/json'
+    },
+    body: JSON.stringify({
+      user: { uid: String(appid) },
+      audio: { data: silenceWav().toString('base64') },
+      request: { model_name: 'bigmodel' }
+    })
+  });
+  if (res.status === 401 || res.status === 403) throw new Error('火山 App ID / Token 无效或权限不足');
+  if (res.status === 404) throw new Error('火山 ASR 端点不可用（404）');
+  const code = res.headers.get?.('X-Api-Status-Code') || '';
+  const msg = res.headers.get?.('X-Api-Message') || '';
+  if (code === '20000000' || code === '20000003' || String(code).startsWith('450')) {
+    return '火山鉴权通过，录音文件极速识别接口可达';
+  }
+  if (!res.ok && !code) throw new Error(`火山测试失败: HTTP ${res.status} ${msg}`);
+  if (code && !String(code).startsWith('200') && !String(code).startsWith('450')) {
+    throw new Error(`火山测试失败: ${code} ${msg}`);
+  }
+  return '火山鉴权通过，录音文件极速识别接口可达';
 }

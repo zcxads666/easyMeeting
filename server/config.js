@@ -28,7 +28,7 @@ export const DEFAULT_SETTINGS = {
   llm: { baseUrl: '', apiKey: '', model: '', temperature: 0.3 },
   asr: {
     provider: 'qwen',
-    qwen: { apiKey: '', model: 'qwen-audio-3.0-asr-flash-filetrans' },
+    qwen: { apiKey: '', model: 'qwen3-asr-flash' },
     volc: { appid: '', token: '', cluster: 'volcengine_input_common' },
     mimo: { apiKey: '', model: 'mimo-v2.5-asr' },
     local: { engine: 'whisper', model: 'whisper-large-v3' }

@@ -1,7 +1,6 @@
-import { transcodeToPcm, transcodeToWav, toBase64DataUri, mimeFor } from '../audio/ffmpeg.js';
+import { transcodeToWav, toBase64DataUri, mimeFor } from '../audio/ffmpeg.js';
 
 function normalizeSegments(rawText, baseMs = 0, stepMs = 3000) {
-  // 简单切分：按句号/换行切句，为每句分配时间戳
   const sentences = rawText
     .split(/[。！？!?\n]+/)
     .map((s) => s.trim())
@@ -14,61 +13,63 @@ function normalizeSegments(rawText, baseMs = 0, stepMs = 3000) {
   });
 }
 
+export const QWEN_ASR_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
+const QWEN_FILE_MODEL = 'qwen3-asr-flash';
+
+function fileAsrModel(model) {
+  const m = model || QWEN_FILE_MODEL;
+  return /filetrans/i.test(m) ? QWEN_FILE_MODEL : m;
+}
+
+function extractQwenText(json) {
+  const content = json.output?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') return content.trim();
+  if (Array.isArray(content)) {
+    return content.map((c) => c.text || c.transcript || '').join('').trim();
+  }
+  return (json.output?.text || json.text || '').trim();
+}
+
 /* ---------------- 千问 ---------------- */
 
-// 非实时文件转写：DashScope 异步提交 + 轮询
+// 本地文件：DashScope 同步 ASR（qwen3-asr-flash + base64 Data URL），禁止 file://
 export async function qwenFileTranscribe({ filePath, fileName }, settings) {
-  const { apiKey, model } = settings.asr.qwen;
+  const { apiKey } = settings.asr.qwen;
   if (!apiKey) throw new Error('未配置千问 API Key');
+  const model = fileAsrModel(settings.asr.qwen.model);
+  const mime = mimeFor(fileName || filePath);
+  let dataUri;
+  try {
+    dataUri = await toBase64DataUri(filePath, mime === 'application/octet-stream' ? 'audio/wav' : mime);
+  } catch (e) {
+    const wavPath = await transcodeToWav(filePath, `qwen_${Date.now()}.wav`);
+    dataUri = await toBase64DataUri(wavPath, mimeFor('.wav'));
+  }
 
-  // 服务端需公网 URL 或本地 file:// 路径；本地路径用 file://
-  const fileUrl = `file://${filePath}`;
-  const base = 'https://dashscope.aliyuncs.com';
-
-  const submit = await fetch(`${base}/api/v1/services/audio/asr/transcription`, {
+  const res = await fetch(QWEN_ASR_URL, {
     method: 'POST',
-    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json', 'X-DashScope-Async': 'enable' },
-    body: JSON.stringify({ model, input: { file_url: fileUrl }, parameters: { channel_id: [0] } })
+    headers: { Authorization: `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      model,
+      input: {
+        messages: [
+          { role: 'system', content: [{ text: '' }] },
+          { role: 'user', content: [{ audio: dataUri }] }
+        ]
+      },
+      parameters: { asr_options: { enable_itn: true } }
+    })
   });
-  const submitJson = await submit.json();
-  if (!submit.ok) throw new Error(`千问提交失败: ${JSON.stringify(submitJson)}`);
-  const taskId = submitJson.output?.task_id;
-  if (!taskId) throw new Error('千问未返回 task_id');
-
-  // 轮询
-  let result;
-  for (let i = 0; i < 300; i++) {
-    await sleep(3000);
-    const q = await fetch(`${base}/api/v1/tasks/${taskId}`, {
-      headers: { Authorization: `Bearer ${apiKey}` }
-    });
-    const qj = await q.json();
-    const status = qj.output?.task_status;
-    if (status === 'SUCCEEDED') { result = qj.output; break; }
-    if (status === 'FAILED' || status === 'UNKNOWN') throw new Error('千问转写失败');
+  const json = await res.json().catch(() => ({}));
+  if (res.status === 401 || res.status === 403) {
+    throw new Error(`千问鉴权失败: ${json.message || json.code || res.status}`);
   }
-  if (!result) throw new Error('千问转写超时');
-
-  // 拉取转写结果 URL
-  const texts = [];
-  const segments = [];
-  for (const r of result.results || []) {
-    if (r.subtask_status !== 'SUCCEEDED') continue;
-    const url = r.transcription_url;
-    const resJson = await (await fetch(url)).json();
-    for (const t of resJson.transcripts || []) {
-      const channelSegs = (t.sentences || []).map((s) => ({
-        start: (s.begin_time ?? 0) * 1,
-        end: (s.end_time ?? 0) * 1,
-        speaker: s.speaker || undefined,
-        text: s.text.trim()
-      }));
-      segments.push(...channelSegs);
-      const full = t.text || '';
-      if (full) texts.push(full.trim());
-    }
+  if (!res.ok) {
+    throw new Error(`千问转写失败: ${json.message || json.code || JSON.stringify(json) || res.status}`);
   }
-  return { segments, text: texts.join('\n') };
+  const text = extractQwenText(json);
+  if (!text) throw new Error(`千问转写未返回文本: ${JSON.stringify(json).slice(0, 300)}`);
+  return { segments: normalizeSegments(text), text };
 }
 
 // 实时：DashScope WebSocket duplex
@@ -125,7 +126,6 @@ export function qwenRealtime(settings) {
   };
 }
 
-function sleep(ms) { return new Promise((r) => setTimeout(r, ms)); }
 function cryptoRandom() {
   return (globalThis.crypto?.randomUUID?.() || 'xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx').replace(/-/g, '').slice(0, 32);
 }
