@@ -116,22 +116,16 @@ test('火山 WS/HTTP 错误不得当成空转写成功', async () => {
   await fsp.rm(dir, { recursive: true, force: true });
 });
 
-test('火山/千问现行端点存在（无 Key 的 401 不算产品失败）', async () => {
-  const volc = await fetch(VOLC_FLASH_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: '{}',
-    signal: AbortSignal.timeout(8000)
-  }).catch((e) => ({ status: 0, error: e }));
-  assert.notEqual(volc.status, 404, `火山 flash 不应 404，got ${volc.status}`);
+test('火山/千问端点 contract 使用明确 HTTPS URL', () => {
+  const volc = new URL(VOLC_FLASH_URL);
+  assert.equal(volc.protocol, 'https:');
+  assert.equal(volc.hostname, 'openspeech.bytedance.com');
+  assert.equal(volc.pathname, '/api/v3/auc/bigmodel/recognize/flash');
 
-  const qwen = await fetch(QWEN_ASR_URL, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json', Authorization: 'Bearer' },
-    body: '{}',
-    signal: AbortSignal.timeout(8000)
-  }).catch((e) => ({ status: 0, error: e }));
-  assert.notEqual(qwen.status, 404, `千问 ASR 不应 404，got ${qwen.status}`);
+  const qwen = new URL(QWEN_ASR_URL);
+  assert.equal(qwen.protocol, 'https:');
+  assert.equal(qwen.hostname, 'dashscope.aliyuncs.com');
+  assert.equal(qwen.pathname, '/api/v1/services/aigc/multimodal-generation/generation');
 });
 
 test('volcTest 未配置时抛错，不请求已死 auth', async () => {

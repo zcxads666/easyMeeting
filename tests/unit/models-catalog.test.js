@@ -6,9 +6,10 @@ import path from 'node:path';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { makeTestDirs, rmTestDirs } from '../helpers/tempdir.js';
+import { resolveProjectPython } from '../../scripts/python-path.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const PY = path.join(ROOT, 'python/.venv/bin/python');
+const PY = await resolveProjectPython(ROOT, { explicit: process.env.MEETING_TEST_PYTHON });
 
 test('产品目录使用可下载的 Qwen3-ASR Hub id，不含 Flash/FileTrans', async () => {
   const src = await fsp.readFile(path.join(ROOT, 'python/model_manager.py'), 'utf8');

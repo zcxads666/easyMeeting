@@ -1,15 +1,13 @@
-import { access } from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import { resolveProjectPython } from './python-path.mjs';
 
 const root = path.resolve(import.meta.dirname, '..');
-const candidates = process.platform === 'win32'
-  ? [path.join(root, 'python', '.venv', 'Scripts', 'python.exe')]
-  : [path.join(root, 'python', '.venv', 'bin', 'python3'), path.join(root, 'python', '.venv', 'bin', 'python')];
-let python = null;
-for (const candidate of candidates) { try { await access(candidate); python = candidate; break; } catch { /* next */ } }
-if (!python) {
-  console.error('[python-test] 项目 Python 环境不存在。请先运行: npm run setup:python');
+let python;
+try {
+  python = await resolveProjectPython(root, { explicit: process.env.MEETING_TEST_PYTHON });
+} catch (error) {
+  console.error(`[python-test] ${error.message}`);
   process.exit(2);
 }
 const child = spawn(python, ['-m', 'unittest', 'discover', '-s', 'python/tests', '-p', 'test_*.py'], {

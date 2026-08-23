@@ -2,6 +2,7 @@ import { test, before, after } from 'node:test';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
+import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import fsp from 'node:fs/promises';
 import { randomUUID } from 'node:crypto';
@@ -13,8 +14,8 @@ const BASE = `http://127.0.0.1:${PORT}`;
 const API_TOKEN = 'sys-test-token';
 
 let child = null;
-const TEST_DATA_DIR = path.join('/tmp', `meeting-sys-test-${Date.now()}`);
-const TEST_MODELS_DIR = path.join('/tmp', `meeting-sys-models-${Date.now()}`);
+const TEST_DATA_DIR = path.join(os.tmpdir(), `meeting-sys-test-${Date.now()}`);
+const TEST_MODELS_DIR = path.join(os.tmpdir(), `meeting-sys-models-${Date.now()}`);
 const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
 
 async function waitHealthy(timeoutMs = 15000) {

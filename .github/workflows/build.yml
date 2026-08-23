@@ -1,95 +1,142 @@
-name: Build Desktop
+name: Desktop CI
 
 on:
-  # GitHub Actions 页面手动运行
   workflow_dispatch:
-
-  # 推送版本标签时自动构建
-  # 例如：v0.1.0、v0.2.0
+  pull_request:
+    branches:
+      - main
   push:
+    branches:
+      - main
     tags:
       - "v*"
 
-# 当前工作流只需要读取仓库
 permissions:
   contents: read
 
+concurrency:
+  group: desktop-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: ${{ github.ref_type != 'tag' }}
+
+env:
+  CI: "true"
+  MEETING_RUNTIME_AUTO_INSTALL: "0"
+  CSC_IDENTITY_AUTO_DISCOVERY: "false"
+
 jobs:
-  build:
-    name: Build ${{ matrix.name }}
-
-    strategy:
-      fail-fast: false
-
-      matrix:
-        include:
-          - os: windows-latest
-            name: Windows
-
-          - os: macos-latest
-            name: macOS
-
-          - os: ubuntu-latest
-            name: Linux
-
-    runs-on: ${{ matrix.os }}
+  quality:
+    name: Tests and web build
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
 
     steps:
-      # 1. 拉取仓库代码
       - name: Checkout repository
         uses: actions/checkout@v7
 
-      # 2. 安装项目使用的 Node.js
-      #
-      # 注意：
-      # 这里的 Node 22 是 easyMeeting 自己运行 npm/build 时使用的版本。
-      # 和 GitHub Actions 内部使用 Node 24 是两回事。
       - name: Setup Node.js
         uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
-      # 3. 安装依赖
-      - name: Install dependencies
-        run: npm ci
-
-      - name: Test Node
-        run: npm test
-
       - name: Setup Python
         uses: actions/setup-python@v6
         with:
           python-version: "3.12"
+          cache: pip
+          cache-dependency-path: python/requirements.txt
 
-      - name: Test Python
-        run: |
-          npm run setup:python
-          npm run test:python
+      - name: Install Node dependencies
+        run: npm ci
 
-      # 4. 构建 Web 前端
-      - name: Build Web
+      - name: Create Python test runtime
+        run: npm run setup:python
+
+      - name: Run Node and system tests
+        run: npm test
+
+      - name: Run Python tests
+        run: npm run test:python
+
+      - name: Build web renderer
         run: npm run build
 
-      - name: Electron smoke (Linux)
+      - name: Check patch whitespace
+        run: git diff --check
+
+  package:
+    name: Package ${{ matrix.name }}
+    needs: quality
+    if: github.event_name != 'pull_request'
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: Windows
+            os: windows-2025
+            artifact: MeetingNotes-Windows
+          - name: macOS
+            os: macos-15
+            artifact: MeetingNotes-macOS
+          - name: Linux
+            os: ubuntu-24.04
+            artifact: MeetingNotes-Linux
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build web renderer
+        run: npm run build
+
+      - name: Install Electron smoke dependencies
+        if: runner.os == 'Linux'
+        run: >-
+          sudo apt-get update && sudo apt-get install -y --no-install-recommends
+          xvfb libnspr4 libnss3 libatk-bridge2.0-0t64 libgtk-3-0t64
+          libgbm1 libasound2t64
+
+      - name: Electron smoke test
         if: runner.os == 'Linux'
         run: xvfb-run -a env ELECTRON_SMOKE_TEST=1 timeout 60s npm run desktop
 
-      # 5. Electron 桌面端打包
-      #
-      # --publish never：
-      # 禁止 electron-builder 在 CI 环境自动尝试发布 GitHub Release，
-      # 避免因为没有 GH_TOKEN 导致打包成功后 CI 反而失败。
-      - name: Build Desktop
-        run: npm run desktop:dist -- --publish never
+      - name: Package Windows
+        if: runner.os == 'Windows'
+        run: npm run desktop:dist -- --win nsis --publish never
+
+      - name: Package macOS
+        if: runner.os == 'macOS'
+        run: npm run desktop:dist -- --mac dmg zip --publish never
+
+      - name: Package Linux
+        if: runner.os == 'Linux'
+        run: npm run desktop:dist -- --linux AppImage --publish never
 
       - name: Verify package contents
         run: npm run verify:package
 
-      # 6. 上传构建产物
-      - name: Upload artifacts
+      - name: Upload installers
         uses: actions/upload-artifact@v6
         with:
-          name: MeetingNotes-${{ matrix.name }}
-          path: release/desktop/**
+          name: ${{ matrix.artifact }}
+          path: |
+            release/desktop/*.exe
+            release/desktop/*.dmg
+            release/desktop/*.zip
+            release/desktop/*.AppImage
+            release/desktop/*.blockmap
+            release/desktop/latest*.yml
           if-no-files-found: error
+          compression-level: 0
+          retention-days: 14

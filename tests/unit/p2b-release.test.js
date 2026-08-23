@@ -5,6 +5,7 @@ import path from 'node:path';
 import os from 'node:os';
 import { createPackage } from '@electron/asar';
 import { verifyPackage } from '../../scripts/verify-package.mjs';
+import { projectPythonCandidates } from '../../scripts/python-path.mjs';
 
 test('Models UI 覆盖 lifecycle、真实 progress 和 benchmark 状态', async () => {
   const source = await fsp.readFile('web/src/pages/Models.jsx', 'utf8');
@@ -16,7 +17,9 @@ test('Models UI 覆盖 lifecycle、真实 progress 和 benchmark 状态', async 
 
 test('Python test runner 明确选择项目 venv 的跨平台路径', async () => {
   const [runner, pkg] = await Promise.all([fsp.readFile('scripts/python-test.mjs', 'utf8'), fsp.readFile('package.json', 'utf8')]);
-  assert.match(runner, /Scripts.*python\.exe/s); assert.match(runner, /bin.*python/s);
+  assert.match(projectPythonCandidates('/repo', 'win32')[0], /python[\\/]\.venv[\\/]Scripts[\\/]python\.exe$/);
+  assert.match(projectPythonCandidates('/repo', 'linux')[0], /python[\\/]\.venv[\\/]bin[\\/]python3$/);
+  assert.match(runner, /resolveProjectPython/);
   assert.match(pkg, /node scripts\/python-test\.mjs/);
 });
 

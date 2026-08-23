@@ -7,9 +7,10 @@ import { spawn } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { makeTestDirs, rmTestDirs, authHeaders } from '../helpers/tempdir.js';
+import { resolveProjectPython } from '../../scripts/python-path.mjs';
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const PY = path.join(ROOT, 'python/.venv/bin/python');
+const PY = await resolveProjectPython(ROOT, { explicit: process.env.MEETING_TEST_PYTHON });
 const { dataDir, modelsDir } = makeTestDirs();
 
 const { saveMeeting, deleteMeeting, getMeeting, ensureDirs } = await import('../../server/services/store/jsonstore.js');
