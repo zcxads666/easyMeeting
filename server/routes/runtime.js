@@ -13,6 +13,7 @@ router.get('/', async (_req, res) => {
   if (state.status === 'running') [capabilities, health] = await Promise.all([getRuntimeCapabilities(), getRuntimeHealth()]);
   res.json({ ...publicState(state), torch: capabilities?.torch || null, transformers: capabilities?.transformers || null,
     devices: capabilities?.devices || null, optionalFeatures: capabilities?.optionalFeatures || null,
+    streaming: capabilities?.streaming || null,
     dependencies: health?.dependencies || null, ffmpeg: await checkFFmpeg() });
 });
 function install(_req, res) {

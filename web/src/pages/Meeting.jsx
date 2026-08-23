@@ -21,6 +21,7 @@ export default function Meeting() {
   const [alignmentLanguage, setAlignmentLanguage] = useState('zh');
   const [postTask, setPostTask] = useState(null);
   const [speakerDrafts, setSpeakerDrafts] = useState({});
+  const [realtimeCapability, setRealtimeCapability] = useState(null);
   const mediaRef = useRef(null);
   const playerRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -64,14 +65,26 @@ export default function Meeting() {
       segmentsRef.current = segments;
       setMeeting((m) => (m ? { ...m, segments, rawText: segments.map((s) => s.text).join('\n') } : m));
     };
-    const onStatus = ({ state }) => {
-      if (state === 'stopped') setRecording(false);
+    const onStatus = async ({ state, mode }) => {
+      if (mode) setRealtimeCapability((value) => ({ ...(value || {}), resolvedMode: mode }));
+      if (state === 'stopped') {
+        setRecording(false);
+        try {
+          const value = await api(`/meetings/${id}`); setMeeting(value);
+          if (value.audioRef) {
+            const token = await api(`/meetings/${id}/audio-token`, { method: 'POST' });
+            setAudioUrl(`${BASE_URL}${token.url}`);
+          }
+        } catch (e) { setError(e.message); }
+      }
     };
+    const onCapability = (value) => { if (!value.meetingId || value.meetingId === id) setRealtimeCapability(value); };
     const onError = ({ error }) => setError(error);
 
     socket.on('rt:partial', onPartial);
     socket.on('rt:final', onFinal);
     socket.on('rt:status', onStatus);
+    socket.on('rt:capability', onCapability);
     socket.on('rt:error', onError);
     window.addEventListener('beforeunload', stopCapture);
 
@@ -81,6 +94,7 @@ export default function Meeting() {
       socket.off('rt:partial', onPartial);
       socket.off('rt:final', onFinal);
       socket.off('rt:status', onStatus);
+      socket.off('rt:capability', onCapability);
       socket.off('rt:error', onError);
     };
   }, [id]);
@@ -95,6 +109,7 @@ export default function Meeting() {
 
   const startRecording = async () => {
     setError('');
+    setRealtimeCapability(null);
     try {
       const stream = await navigator.mediaDevices.getUserMedia({ audio: { sampleRate: 16000 } });
       mediaRef.current = stream;
@@ -122,7 +137,6 @@ export default function Meeting() {
 
   const stopRecording = async () => {
     stopCapture();
-    setTimeout(() => api(`/meetings/${id}`).then(setMeeting).catch(() => {}), 800);
   };
 
   const onUpload = async (files) => {
@@ -323,7 +337,8 @@ export default function Meeting() {
       {/* 实时字幕 */}
       {recording && (
         <div className="card p-5 mb-6">
-          <p className="text-gray-400 text-xs mb-2">实时转写</p>
+          <p className="text-gray-400 text-xs mb-2">实时模式：{realtimeModeLabel(realtimeCapability?.resolvedMode)}</p>
+          {realtimeCapability?.reason && <p className="text-amber-600 text-xs mb-2">{realtimeCapability.reason}</p>}
           <p className="text-lg">
             {partial ? <span className="text-gray-400">{partial}</span> : <span className="text-gray-300">正在聆听…</span>}
           </p>
@@ -381,6 +396,13 @@ function uint8ToBase64(uint8) {
     binary += String.fromCharCode.apply(null, chunk);
   }
   return btoa(binary);
+}
+
+function realtimeModeLabel(mode) {
+  if (mode === 'true-streaming') return 'True Streaming';
+  if (mode === 'chunked') return 'Near-Realtime (Chunked)';
+  if (mode === 'none') return '不可用';
+  return '正在解析…';
 }
 
 function taskStageLabel(stage) {

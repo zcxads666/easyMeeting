@@ -60,9 +60,11 @@
       "python/transcribe_qwen.py",
       "python/forced_aligner.py",
       "python/diarization.py",
+      "python/streaming_vllm.py",
       "python/runtime.py",
       "python/requirements.txt",
       "python/requirements-diarization.txt",
+      "python/requirements-streaming.txt",
       "README.md",
       "docs/**/*",
       "package.json"
@@ -74,9 +76,11 @@
       "python/transcribe_qwen.py",
       "python/forced_aligner.py",
       "python/diarization.py",
+      "python/streaming_vllm.py",
       "python/runtime.py",
-      "python/requirements.txt"
-      ,"python/requirements-diarization.txt"
+      "python/requirements.txt",
+      "python/requirements-diarization.txt",
+      "python/requirements-streaming.txt"
     ],
     "mac": {
       "target": [

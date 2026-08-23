@@ -40,7 +40,7 @@ export const DEFAULT_SETTINGS = {
   },
   correction: { enabled: true },
   huggingFace: { token: '' },
-  alignment: { model: 'Qwen/Qwen3-ForcedAligner-0.6B-hf', device: 'auto' },
+  alignment: { model: 'Qwen/Qwen3-ForcedAligner-0.6B-hf', device: 'auto', language: 'zh' },
   diarization: { model: 'pyannote/speaker-diarization-community-1', device: 'auto', numSpeakers: null, minSpeakers: null, maxSpeakers: null },
   postProcessing: { autoAlign: false, autoDiarize: false },
   realtime: { mode: 'auto' },

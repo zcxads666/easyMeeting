@@ -110,6 +110,18 @@ test('stop 后磁盘含未在 stop 前 flush 的 final 段落', async () => {
   await api('DELETE', `/api/meetings/${m.id}`);
 });
 
+test('实时 PCM 独立持久化为 WAV，stop 在文件和 meeting 保存后才完成', async () => {
+  const { data: m } = await api('POST', '/api/meetings', { title: 'recording' });
+  const socket = await connectSocket(); socket.emit('rt:start', { meetingId: m.id }); await sleep(50);
+  const pcm = Buffer.alloc(3200, 1).toString('base64'); socket.emit('rt:audio', { meetingId: m.id, data: pcm });
+  const stopped = new Promise((resolve) => socket.on('rt:status', ({ state }) => state === 'stopped' && resolve()));
+  socket.emit('rt:stop', { meetingId: m.id }); await stopped; socket.close();
+  const { data: loaded } = await api('GET', `/api/meetings/${m.id}`);
+  assert.match(loaded.audioRef, /realtime_.*\.wav$/); assert.equal(loaded.duration, .1);
+  const wav = await fsp.readFile(loaded.audioRef); assert.equal(wav.subarray(0, 4).toString(), 'RIFF');
+  await api('DELETE', `/api/meetings/${m.id}`);
+});
+
 test('local/mimo start().catch 不炸', async () => {
   const local = localRealtime({ asr: { local: { engine: 'whisper', model: 'whisper-tiny' } } });
   await local.start().catch((e) => { throw e; });

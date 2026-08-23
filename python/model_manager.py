@@ -54,6 +54,8 @@ CATALOG_BY_ID = {item["id"]: item for item in MODEL_CATALOG}
 _size_cache = {}
 _repository_revisions = {}
 _model_locks = {model_id: threading.Lock() for model_id in CATALOG_BY_ID}
+_model_users = {model_id: 0 for model_id in CATALOG_BY_ID}
+_model_users_guard = threading.Lock()
 
 
 class ModelLifecycleError(ValueError):
@@ -166,6 +168,16 @@ def verify_model(model_id, create_legacy_manifest=True):
 
 
 def known_ids(): return list(CATALOG_BY_ID)
+
+def retain_model(model_id):
+    if model_id not in CATALOG_BY_ID: raise ModelLifecycleError("MODEL_UNKNOWN", f"未知模型: {model_id}")
+    with _model_users_guard: _model_users[model_id] += 1
+
+def release_model(model_id):
+    with _model_users_guard: _model_users[model_id] = max(0, _model_users.get(model_id, 0) - 1)
+
+def model_in_use(model_id):
+    with _model_users_guard: return _model_users.get(model_id, 0) > 0
 def _repository(model_id): return f"Systran/faster-whisper-{model_id.removeprefix('whisper-')}" if model_id.startswith("whisper-") else model_id
 
 
@@ -348,6 +360,7 @@ def switch(model_id):
 def delete(model_id, release=None):
     if download_manager.status(model_id)["status"] in ("queued", "downloading", "verifying"):
         raise ModelLifecycleError("MODEL_BUSY", "模型正在下载，不能删除")
+    if model_in_use(model_id): raise ModelLifecycleError("MODEL_BUSY", "模型正在被实时会话使用，不能删除")
     try:
         with model_operation(model_id):
             download_manager._set(model_id, status="deleting", error=None)

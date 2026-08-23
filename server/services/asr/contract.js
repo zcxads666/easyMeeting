@@ -65,6 +65,8 @@ export function normalizeRealtimeMetrics(metrics = {}) {
     latencyMs: finiteOrNull(metrics.latencyMs),
     audioDuration: finiteOrNull(metrics.audioDuration),
     inferenceDuration: finiteOrNull(metrics.inferenceDuration),
-    realtimeFactor: finiteOrNull(metrics.realtimeFactor)
+    realtimeFactor: finiteOrNull(metrics.realtimeFactor),
+    firstPartialLatencyMs: finiteOrNull(metrics.firstPartialLatencyMs),
+    finalLatencyMs: finiteOrNull(metrics.finalLatencyMs)
   };
 }

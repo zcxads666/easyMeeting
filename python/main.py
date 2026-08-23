@@ -11,6 +11,7 @@ import transcribe_whisper
 import transcribe_qwen
 import forced_aligner
 import diarization
+import streaming_vllm
 import runtime
 
 app = FastAPI(title="Meeting Local Inference")
@@ -62,12 +63,25 @@ class DiarizationReq(BaseModel):
     max_speakers: Optional[int] = Field(default=None, ge=1, le=100)
 
 
+class StreamStartReq(BaseModel):
+    model: str = "Qwen/Qwen3-ASR-0.6B-hf"
+
+
+class StreamAudioReq(BaseModel):
+    session_id: str
+    pcm: str
+
+
+class StreamStopReq(BaseModel):
+    session_id: str
+
+
 @app.get("/health")
 def health():
     return {"ok": True, "models_dir": str(model_manager.MODELS_DIR)}
 
 @app.get("/runtime/capabilities")
-def runtime_capabilities(): return runtime.capabilities()
+def runtime_capabilities(): return {**runtime.capabilities(), "streaming": streaming_vllm.capability()}
 
 @app.get("/runtime/health")
 def runtime_health(): return runtime.health()
@@ -122,7 +136,7 @@ async def switch_model(req: SwitchReq):
 @app.delete("/models/{model_id:path}")
 async def delete_model(model_id: str):
     try:
-        return model_manager.delete(model_id, lambda: (transcribe_whisper.release(), transcribe_qwen.release(), forced_aligner.release(), diarization.release()))
+        return model_manager.delete(model_id, lambda: (transcribe_whisper.release(), transcribe_qwen.release(), forced_aligner.release(), diarization.release(), streaming_vllm.release()))
     except model_manager.ModelLifecycleError as e:
         raise HTTPException(status_code=409 if e.code == "MODEL_BUSY" else 400,
                             detail={"code": e.code, "message": str(e), **e.details})
@@ -174,6 +188,29 @@ def diarize(req: DiarizationReq):
     except diarization.DiarizationRuntimeError as exc:
         status = 409 if exc.code in {"DIARIZATION_RUNTIME_NOT_INSTALLED", "DIARIZATION_MODEL_NOT_INSTALLED"} else 400 if "DEVICE" in exc.code else 500
         raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc), **exc.context})
+
+
+def _stream_error(exc):
+    return HTTPException(status_code=409 if exc.code in {"TRUE_STREAMING_UNAVAILABLE", "MODEL_NOT_READY", "MODEL_BUSY"} else 400,
+                         detail={"code": exc.code, "message": str(exc), **exc.details})
+
+
+@app.post("/streaming/start")
+def streaming_start(req: StreamStartReq):
+    try: return streaming_vllm.start(req.model)
+    except streaming_vllm.StreamingRuntimeError as exc: raise _stream_error(exc)
+
+
+@app.post("/streaming/send")
+def streaming_send(req: StreamAudioReq):
+    try: return streaming_vllm.send(req.session_id, base64.b64decode(req.pcm))
+    except streaming_vllm.StreamingRuntimeError as exc: raise _stream_error(exc)
+
+
+@app.post("/streaming/stop")
+def streaming_stop(req: StreamStopReq):
+    try: return streaming_vllm.stop(req.session_id)
+    except streaming_vllm.StreamingRuntimeError as exc: raise _stream_error(exc)
 
 
 def _read_uploads_file(file_path: str) -> bytes:

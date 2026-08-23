@@ -8,7 +8,7 @@ const ALLOWED = {
   'asr.qwen': new Set(['apiKey', 'model']), 'asr.volc': new Set(['appid', 'token', 'cluster']),
   'asr.mimo': new Set(['apiKey', 'model']), 'asr.local': new Set(['engine', 'model', 'device', 'computeType']),
   correction: new Set(['enabled']), huggingFace: new Set(['token']),
-  alignment: new Set(['model', 'device']),
+  alignment: new Set(['model', 'device', 'language']),
   diarization: new Set(['model', 'device', 'numSpeakers', 'minSpeakers', 'maxSpeakers']),
   postProcessing: new Set(['autoAlign', 'autoDiarize']), realtime: new Set(['mode']), ui: new Set(['theme'])
 };
@@ -41,6 +41,7 @@ export function validateSettingsPatch(patch) {
   if (patch.ui?.theme != null && !['light', 'dark'].includes(patch.ui.theme)) fail('无效的 ui.theme');
   if (patch.correction?.enabled != null && typeof patch.correction.enabled !== 'boolean') fail('correction.enabled 必须是 boolean');
   if (patch.alignment?.device != null && !DEVICES.has(patch.alignment.device)) fail('无效的 alignment.device');
+  if (patch.alignment?.language != null) shortString(patch.alignment.language, 'alignment.language', 32);
   if (patch.diarization?.device != null && !new Set(['auto', 'cpu', 'cuda']).has(patch.diarization.device)) fail('无效的 diarization.device');
   if (patch.realtime?.mode != null && !new Set(['auto', 'chunked', 'true-streaming']).has(patch.realtime.mode)) fail('无效的 realtime.mode');
   for (const group of ['postProcessing']) for (const key of ['autoAlign', 'autoDiarize']) {
@@ -64,7 +65,7 @@ export function migrateSettings(input) {
   if (version < 3) version = 3;
   if (version < 4) {
     settings.huggingFace ||= { token: '' };
-    settings.alignment ||= { model: 'Qwen/Qwen3-ForcedAligner-0.6B-hf', device: 'auto' };
+    settings.alignment ||= { model: 'Qwen/Qwen3-ForcedAligner-0.6B-hf', device: 'auto', language: 'zh' };
     settings.diarization ||= { model: 'pyannote/speaker-diarization-community-1', device: 'auto', numSpeakers: null, minSpeakers: null, maxSpeakers: null };
     settings.postProcessing ||= { autoAlign: false, autoDiarize: false };
     settings.realtime ||= { mode: 'auto' };

@@ -110,6 +110,11 @@ export default function Settings() {
         <p className="text-sm text-gray-400 mb-4">说话人分离是可选离线功能；Community-1 下载前需接受 Hugging Face 条款。</p>
         <div className="space-y-4">
           <Field label="Hugging Face Token"><input className="input" type="password" value={form.huggingFace.token} onChange={(e) => set('huggingFace', 'token', e.target.value)} placeholder="hf_…" /></Field>
+          <Field label="本地实时模式" hint="auto 会优先使用可用的 vLLM true streaming，并明确显示实际回退原因">
+            <select className="input" value={form.realtime.mode} onChange={(e) => set('realtime', 'mode', e.target.value)}>
+              <option value="auto">自动</option><option value="chunked">Near-Realtime (Chunked)</option><option value="true-streaming">True Streaming（需 Linux + CUDA + 可选 Runtime）</option>
+            </select>
+          </Field>
           <div className="flex items-center justify-between"><span className="text-sm">转写后自动精确对齐</span><Toggle checked={form.postProcessing.autoAlign} onChange={(value) => set('postProcessing', 'autoAlign', value)} /></div>
           <div className="flex items-center justify-between"><span className="text-sm">转写后自动说话人分离</span><Toggle checked={form.postProcessing.autoDiarize} onChange={(value) => set('postProcessing', 'autoDiarize', value)} /></div>
           <button className="btn-primary" onClick={() => saveAll()}>保存高级设置</button>
