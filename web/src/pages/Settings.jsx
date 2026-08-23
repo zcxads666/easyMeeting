@@ -105,6 +105,17 @@ export default function Settings() {
         </div>
       </section>
 
+      <section className="card p-6 mb-6">
+        <h2 className="font-semibold mb-2">高级本地处理</h2>
+        <p className="text-sm text-gray-400 mb-4">说话人分离是可选离线功能；Community-1 下载前需接受 Hugging Face 条款。</p>
+        <div className="space-y-4">
+          <Field label="Hugging Face Token"><input className="input" type="password" value={form.huggingFace.token} onChange={(e) => set('huggingFace', 'token', e.target.value)} placeholder="hf_…" /></Field>
+          <div className="flex items-center justify-between"><span className="text-sm">转写后自动精确对齐</span><Toggle checked={form.postProcessing.autoAlign} onChange={(value) => set('postProcessing', 'autoAlign', value)} /></div>
+          <div className="flex items-center justify-between"><span className="text-sm">转写后自动说话人分离</span><Toggle checked={form.postProcessing.autoDiarize} onChange={(value) => set('postProcessing', 'autoDiarize', value)} /></div>
+          <button className="btn-primary" onClick={() => saveAll()}>保存高级设置</button>
+        </div>
+      </section>
+
       {/* ASR 云端 */}
       <section className="card p-6 mb-6">
         <div className="flex items-center justify-between mb-4">

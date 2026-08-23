@@ -59,8 +59,10 @@
       "python/transcribe_whisper.py",
       "python/transcribe_qwen.py",
       "python/forced_aligner.py",
+      "python/diarization.py",
       "python/runtime.py",
       "python/requirements.txt",
+      "python/requirements-diarization.txt",
       "README.md",
       "docs/**/*",
       "package.json"
@@ -71,8 +73,10 @@
       "python/transcribe_whisper.py",
       "python/transcribe_qwen.py",
       "python/forced_aligner.py",
+      "python/diarization.py",
       "python/runtime.py",
       "python/requirements.txt"
+      ,"python/requirements-diarization.txt"
     ],
     "mac": {
       "target": [

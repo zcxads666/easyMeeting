@@ -44,6 +44,10 @@ def _version(distribution):
     try: return importlib.metadata.version(distribution)
     except importlib.metadata.PackageNotFoundError: return None
 
+def _available(module):
+    try: return importlib.util.find_spec(module) is not None
+    except (ModuleNotFoundError, ValueError): return False
+
 def capabilities(torch_module=None):
     torch = torch_module
     if torch is None and importlib.util.find_spec("torch"):
@@ -52,6 +56,12 @@ def capabilities(torch_module=None):
     cuda_available = bool(torch and torch.cuda.is_available())
     mps_backend = getattr(getattr(torch, "backends", None), "mps", None)
     mps_available = bool(mps_backend and mps_backend.is_available())
+    optional_features = {
+        "alignment-ja": {"available": _available("nagisa"), "dependency": "nagisa"},
+        "alignment-ko": {"available": _available("soynlp"), "dependency": "soynlp"},
+        "diarization": {"available": _available("pyannote.audio"), "dependency": "pyannote.audio"},
+        "qwen-streaming-vllm": {"available": _available("vllm"), "dependency": "vllm"},
+    }
     return {
         "python": platform.python_version(), "platform": platform.platform(), "machine": platform.machine(),
         "torch": getattr(torch, "__version__", None), "transformers": _version("transformers"),
@@ -61,6 +71,7 @@ def capabilities(torch_module=None):
                      "vram": torch.cuda.get_device_properties(0).total_memory if cuda_available else None},
             "mps": {"available": mps_available},
         },
+        "optionalFeatures": optional_features,
     }
 
 def health():

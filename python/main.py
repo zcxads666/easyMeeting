@@ -10,6 +10,7 @@ import model_manager
 import transcribe_whisper
 import transcribe_qwen
 import forced_aligner
+import diarization
 import runtime
 
 app = FastAPI(title="Meeting Local Inference")
@@ -29,6 +30,7 @@ class TranscribeReq(BaseModel):
 
 class DownloadReq(BaseModel):
     id: str
+    token: Optional[str] = None
 
 
 class SwitchReq(BaseModel):
@@ -49,6 +51,15 @@ class AlignmentReq(BaseModel):
     language: str
     model: str = forced_aligner.DEFAULT_MODEL
     device: str = "auto"
+
+
+class DiarizationReq(BaseModel):
+    file: str
+    model: str = diarization.DEFAULT_MODEL
+    device: str = "auto"
+    num_speakers: Optional[int] = Field(default=None, ge=1, le=100)
+    min_speakers: Optional[int] = Field(default=None, ge=1, le=100)
+    max_speakers: Optional[int] = Field(default=None, ge=1, le=100)
 
 
 @app.get("/health")
@@ -74,7 +85,7 @@ def download_status():
 
 @app.post("/models/download")
 async def download(req: DownloadReq):
-    try: return {"ok": True, "id": req.id, **model_manager.download_manager.start(req.id)}
+    try: return {"ok": True, "id": req.id, **model_manager.download_manager.start(req.id, req.token)}
     except model_manager.ModelLifecycleError as e:
         raise HTTPException(status_code=400, detail={"code": e.code, "message": str(e), **e.details})
 
@@ -111,7 +122,7 @@ async def switch_model(req: SwitchReq):
 @app.delete("/models/{model_id:path}")
 async def delete_model(model_id: str):
     try:
-        return model_manager.delete(model_id, lambda: (transcribe_whisper.release(), transcribe_qwen.release(), forced_aligner.release()))
+        return model_manager.delete(model_id, lambda: (transcribe_whisper.release(), transcribe_qwen.release(), forced_aligner.release(), diarization.release()))
     except model_manager.ModelLifecycleError as e:
         raise HTTPException(status_code=409 if e.code == "MODEL_BUSY" else 400,
                             detail={"code": e.code, "message": str(e), **e.details})
@@ -146,6 +157,22 @@ def align(req: AlignmentReq):
         raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc), **exc.details})
     except forced_aligner.AlignmentRuntimeError as exc:
         status = 409 if exc.code in {"ALIGNER_NOT_INSTALLED", "ALIGNMENT_LANGUAGE_DEPENDENCY_MISSING"} else 400 if exc.code.startswith("ALIGNMENT_") else 500
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc), **exc.context})
+
+
+@app.post("/diarize")
+def diarize(req: DiarizationReq):
+    _read_uploads_file(req.file)  # path boundary and existence check; pyannote streams the WAV itself.
+    try:
+        state = model_manager.verify_model(req.model)
+        if state["status"] != "ready":
+            raise model_manager.ModelLifecycleError("DIARIZATION_MODEL_NOT_INSTALLED", "说话人分离模型尚未就绪", status=state["status"])
+        with model_manager.model_operation(req.model):
+            return diarization.diarize_file(req.file, req.model, req.device, req.num_speakers, req.min_speakers, req.max_speakers)
+    except model_manager.ModelLifecycleError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc), **exc.details})
+    except diarization.DiarizationRuntimeError as exc:
+        status = 409 if exc.code in {"DIARIZATION_RUNTIME_NOT_INSTALLED", "DIARIZATION_MODEL_NOT_INSTALLED"} else 400 if "DEVICE" in exc.code else 500
         raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc), **exc.context})
 
 

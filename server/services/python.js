@@ -91,6 +91,27 @@ async function readRequirements() {
   return raw.split('\n').map((l) => l.trim()).filter((l) => l && !l.startsWith('#'));
 }
 
+const OPTIONAL_FEATURES = {
+  diarization: { requirements: 'requirements-diarization.txt', importName: 'pyannote.audio' },
+  'alignment-ja': { packages: ['nagisa'], importName: 'nagisa' },
+  'alignment-ko': { packages: ['soynlp'], importName: 'soynlp' },
+  'qwen-streaming-vllm': { requirements: 'requirements-streaming.txt', importName: 'vllm' }
+};
+
+export async function installRuntimeFeature(feature, { signal, onStage } = {}) {
+  const definition = OPTIONAL_FEATURES[feature];
+  if (!definition) throw Object.assign(new Error(`未知 Runtime feature: ${feature}`), { code: 'RUNTIME_FEATURE_UNKNOWN' });
+  if (!(await exists(VENV_PYTHON))) throw Object.assign(new Error('请先安装基础 AI Runtime'), { code: 'RUNTIME_NOT_INSTALLED' });
+  onStage?.('installing_optional_feature');
+  const args = definition.requirements ? ['-r', path.join(PY_DIR, definition.requirements)] : definition.packages;
+  await pipInstall(VENV_PYTHON, args, signal);
+  onStage?.('verifying');
+  try { await execFileAsync(VENV_PYTHON, ['-c', `import importlib; importlib.import_module(${JSON.stringify(definition.importName)})`]); }
+  catch (error) { throw Object.assign(new Error(`Runtime feature 验证失败: ${feature}`), { code: 'RUNTIME_FEATURE_VERIFY_FAILED', cause: error }); }
+  await restartRuntime();
+  return { feature, status: 'ready' };
+}
+
 // 确保虚拟环境存在且依赖可用，返回 venv 内 python 路径
 async function ensureVenv({ allowInstall = AUTO_INSTALL, signal, onStage = () => {} } = {}) {
   if (await exists(VENV_PYTHON)) {
@@ -321,7 +342,8 @@ async function hasActiveDownload() {
 
 // 推理服务源码文件的最新 mtime（main.py / model_manager.py / transcribe_* / requirements.txt）
 async function pythonCodeMtime() {
-  const files = ['main.py', 'model_manager.py', 'transcribe_whisper.py', 'transcribe_qwen.py', 'requirements.txt'];
+  const files = ['main.py', 'model_manager.py', 'transcribe_whisper.py', 'transcribe_qwen.py', 'forced_aligner.py',
+    'diarization.py', 'streaming_vllm.py', 'requirements.txt', 'requirements-diarization.txt', 'requirements-streaming.txt'];
   let max = 0;
   for (const f of files) {
     try {

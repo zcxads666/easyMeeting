@@ -14,11 +14,16 @@ export const MODEL_CATALOG = [
   })),
   { id: 'Qwen/Qwen3-ForcedAligner-0.6B-hf', label: 'Qwen3-ForcedAligner-0.6B-hf', role: 'aligner',
     engine: 'qwen-forced-aligner', kind: 'qwen-forced-aligner', backend: 'transformers', source: 'huggingface',
-    estimatedSizeBytes: Math.round(1.8 * GB), supportedDevices: ['cpu', 'cuda', 'mps'] }
+    estimatedSizeBytes: Math.round(1.8 * GB), supportedDevices: ['cpu', 'cuda', 'mps'] },
+  { id: 'pyannote/speaker-diarization-community-1', label: 'Speaker Diarization Community-1', role: 'diarization',
+    engine: 'pyannote', kind: 'pyannote', backend: 'pyannote.audio', source: 'huggingface', gated: true, bundle: true,
+    estimatedSizeBytes: Math.round(3 * GB), supportedDevices: ['cpu', 'cuda'] }
 ];
 
 function directoryFor(model) {
-  return path.join(MODELS_DIR, model.engine === 'whisper' ? model.id : `qwen-${model.id.replaceAll('/', '--')}`);
+  if (model.engine === 'whisper') return path.join(MODELS_DIR, model.id);
+  if (model.role === 'diarization') return path.join(MODELS_DIR, `diarization-${model.id.replaceAll('/', '--')}`);
+  return path.join(MODELS_DIR, `qwen-${model.id.replaceAll('/', '--')}`);
 }
 async function files(directory) { try { return await fsp.readdir(directory); } catch { return null; } }
 async function size(directory) {
@@ -33,10 +38,12 @@ export async function inspectModelsWithoutRuntime() {
   return Promise.all(MODEL_CATALOG.map(async (model) => {
     const directory = directoryFor(model); const names = await files(directory);
     if (!names) return { ...model, status: 'not_installed', installed: false, sizeBytes: 0, error: null };
-    const hasConfig = names.includes('config.json');
+    const isDiarization = model.role === 'diarization';
+    const hasConfig = isDiarization ? names.includes('config.yaml') : names.includes('config.json');
     const hasWeights = names.some((name) => name === 'model.bin' || name === 'pytorch_model.bin' || name.endsWith('.safetensors') || name.endsWith('.index.json'));
     const hasProcessor = model.backend !== 'transformers' || names.includes('preprocessor_config.json') || names.includes('processor_config.json');
-    const ready = hasConfig && hasWeights && hasProcessor;
+    const hasBundle = !isDiarization || ['segmentation', 'embedding', 'plda'].every((name) => names.includes(name));
+    const ready = hasConfig && (isDiarization || hasWeights) && hasProcessor && hasBundle;
     return { ...model, status: ready ? 'ready' : 'broken', installed: ready, sizeBytes: await size(directory),
       error: ready ? null : { code: 'MODEL_INCOMPLETE', message: '模型文件不完整；Runtime 可用后可执行验证或重新下载' } };
   }));

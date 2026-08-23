@@ -28,7 +28,7 @@ export const PORT = process.env.PORT || 3000;
 export const BIND_HOST = process.env.MEETING_BIND_HOST || '127.0.0.1';
 
 export const DEFAULT_SETTINGS = {
-  schemaVersion: 3,
+  schemaVersion: 4,
   secretMigrationVersion: 0,
   llm: { baseUrl: '', apiKey: '', model: '', temperature: 0.3 },
   asr: {
@@ -39,5 +39,10 @@ export const DEFAULT_SETTINGS = {
     local: { engine: 'whisper', model: 'whisper-large-v3', device: 'auto' }
   },
   correction: { enabled: true },
+  huggingFace: { token: '' },
+  alignment: { model: 'Qwen/Qwen3-ForcedAligner-0.6B-hf', device: 'auto' },
+  diarization: { model: 'pyannote/speaker-diarization-community-1', device: 'auto', numSpeakers: null, minSpeakers: null, maxSpeakers: null },
+  postProcessing: { autoAlign: false, autoDiarize: false },
+  realtime: { mode: 'auto' },
   ui: { theme: 'light' }
 };

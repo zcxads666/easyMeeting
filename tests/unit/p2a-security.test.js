@@ -25,7 +25,7 @@ test('SecretStore save/load/clear 与加密文件不含明文', async () => {
 
 test('settings migration 保留旧值并严格验证 patch', () => {
   const migrated = migrateSettings({ llm: { model: 'old-model' }, asr: { local: { engine: 'whisper' } } });
-  assert.equal(migrated.schemaVersion, 3); assert.equal(migrated.llm.model, 'old-model'); assert.equal(migrated.asr.local.device, 'auto');
+  assert.equal(migrated.schemaVersion, 4); assert.equal(migrated.llm.model, 'old-model'); assert.equal(migrated.asr.local.device, 'auto');
   assert.throws(() => migrateSettings({ schemaVersion: 99 }), /不支持/);
   assert.throws(() => validateSettingsPatch({ asr: { provider: 'evil' } }), /provider/);
   assert.throws(() => validateSettingsPatch(JSON.parse('{"__proto__":{"polluted":true}}')), /未知/);

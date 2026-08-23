@@ -17,12 +17,14 @@ logger = logging.getLogger("meeting.model")
 WHISPER_SIZES = ["tiny", "base", "small", "medium", "large-v3"]
 QWEN_MODELS = ["Qwen/Qwen3-ASR-0.6B-hf", "Qwen/Qwen3-ASR-1.7B-hf"]
 ALIGNER_MODELS = ["Qwen/Qwen3-ForcedAligner-0.6B-hf"]
+DIARIZATION_MODELS = ["pyannote/speaker-diarization-community-1"]
 DEFAULT_SOURCE = os.environ.get("MEETING_MODEL_SOURCE", "huggingface")
 REFERENCE_SIZES_GB = {
     "whisper-tiny": .08, "whisper-base": .15, "whisper-small": .5,
     "whisper-medium": 1.5, "whisper-large-v3": 3.0,
     "Qwen/Qwen3-ASR-0.6B-hf": 1.6, "Qwen/Qwen3-ASR-1.7B-hf": 3.8,
     "Qwen/Qwen3-ForcedAligner-0.6B-hf": 1.8,
+    "pyannote/speaker-diarization-community-1": 3.0,
 }
 MODEL_CATALOG = [
     *[{"id": f"whisper-{s}", "label": f"Whisper {s}", "role": "asr", "engine": "whisper", "backend": "faster-whisper",
@@ -42,6 +44,11 @@ MODEL_CATALOG = [
        "supportedLanguages": ["Chinese", "English", "Cantonese", "French", "German", "Italian",
                               "Japanese", "Korean", "Portuguese", "Russian", "Spanish"],
        "supportsTimestamps": True, "supportsStreaming": False} for mid in ALIGNER_MODELS],
+    *[{"id": mid, "label": "Speaker Diarization Community-1", "role": "diarization", "engine": "pyannote",
+       "backend": "pyannote.audio", "source": "huggingface", "gated": True, "bundle": True,
+       "estimatedSize": int(REFERENCE_SIZES_GB[mid] * 1024 ** 3),
+       "supportedDevices": ["cpu", "cuda"], "recommendedDevice": "auto",
+       "supportsTimestamps": True, "supportsStreaming": False} for mid in DIARIZATION_MODELS],
 ]
 CATALOG_BY_ID = {item["id"]: item for item in MODEL_CATALOG}
 _size_cache = {}
@@ -90,10 +97,13 @@ def ensure_dir():
 
 def _whisper_local_dir(size): return MODELS_DIR / f"whisper-{size}"
 def _qwen_local_dir(model_id): return MODELS_DIR / f"qwen-{model_id.replace('/', '--')}"
+def _diarization_local_dir(model_id): return MODELS_DIR / f"diarization-{model_id.replace('/', '--')}"
 def model_dir(model_id):
     item = CATALOG_BY_ID.get(model_id)
     if not item: raise ModelLifecycleError("MODEL_UNKNOWN", f"未知模型: {model_id}")
-    return _whisper_local_dir(model_id.removeprefix("whisper-")) if item["engine"] == "whisper" else _qwen_local_dir(model_id)
+    if item["engine"] == "whisper": return _whisper_local_dir(model_id.removeprefix("whisper-"))
+    if item["role"] == "diarization": return _diarization_local_dir(model_id)
+    return _qwen_local_dir(model_id)
 def download_dir(model_id): return MODELS_DIR / DOWNLOADS_DIR_NAME / model_id.replace("/", "--")
 
 
@@ -113,6 +123,13 @@ def verify_structure(model_id, directory):
     directory = Path(directory); item = CATALOG_BY_ID.get(model_id)
     if not item: return False, "unknown model"
     if not directory.is_dir(): return False, "model directory missing"
+    if item["role"] == "diarization":
+        if not (directory / "config.yaml").is_file(): return False, "pipeline config.yaml missing"
+        for component in ("segmentation", "embedding"):
+            component_dir = directory / component
+            if not component_dir.is_dir() or not _weight_exists(component_dir): return False, f"{component} component missing"
+        if not (directory / "plda").is_dir(): return False, "plda component missing"
+        return True, None
     if not (directory / "config.json").is_file(): return False, "config.json missing"
     if not _weight_exists(directory): return False, "model weights missing"
     if item["backend"] == "transformers" and not any((directory / name).is_file() for name in
@@ -152,11 +169,11 @@ def known_ids(): return list(CATALOG_BY_ID)
 def _repository(model_id): return f"Systran/faster-whisper-{model_id.removeprefix('whisper-')}" if model_id.startswith("whisper-") else model_id
 
 
-def repository_total_bytes(model_id):
+def repository_total_bytes(model_id, token=None):
     if CATALOG_BY_ID[model_id]["source"] != "huggingface": return None
     try:
         from huggingface_hub import HfApi
-        info = HfApi().model_info(_repository(model_id), files_metadata=True)
+        info = HfApi().model_info(_repository(model_id), files_metadata=True, token=token)
         siblings = info.siblings
         _repository_revisions[model_id] = getattr(info, "sha", None)
         sizes = [getattr(file, "size", None) for file in siblings]
@@ -178,7 +195,7 @@ def _cancel_tqdm(cancel_event):
     return CancelableTqdm
 
 
-def download(model_id, destination=None, cancel_event=None):
+def download(model_id, destination=None, cancel_event=None, token=None):
     if model_id not in CATALOG_BY_ID: raise ModelLifecycleError("MODEL_UNKNOWN", f"未知模型: {model_id}")
     ensure_dir(); destination = Path(destination or download_dir(model_id)); destination.mkdir(parents=True, exist_ok=True)
     item = CATALOG_BY_ID[model_id]; repository = _repository(model_id)
@@ -190,7 +207,7 @@ def download(model_id, destination=None, cancel_event=None):
         try: from huggingface_hub import snapshot_download
         except ImportError as exc: raise RuntimeError("缺少依赖 huggingface_hub") from exc
         snapshot_download(repo_id=repository, local_dir=str(destination), local_dir_use_symlinks=False,
-                          tqdm_class=_cancel_tqdm(cancel_event))
+                          tqdm_class=_cancel_tqdm(cancel_event), token=token)
     if cancel_event and cancel_event.is_set(): raise InterruptedError("模型下载已取消")
     return destination
 
@@ -235,14 +252,16 @@ class DownloadManager:
         with self.guard: return {key: dict(value) for key, value in self.records.items()}
     def _set(self, model_id, **fields):
         with self.guard: self.records.setdefault(model_id, self._record("checking")).update(fields)
-    def start(self, model_id):
+    def start(self, model_id, token=None):
         if model_id not in CATALOG_BY_ID: raise ModelLifecycleError("MODEL_UNKNOWN", f"未知模型: {model_id}")
+        if CATALOG_BY_ID[model_id].get("gated") and not token:
+            raise ModelLifecycleError("HF_AUTH_REQUIRED", "该模型需要 Hugging Face 授权 Token，并需先接受模型使用条款")
         with self.guard:
             existing = self.records.get(model_id)
             if existing and existing["status"] in ("queued", "downloading", "verifying"):
                 return {"alreadyDownloading": True, **dict(existing)}
             event = threading.Event(); self.cancel_events[model_id] = event; self.records[model_id] = self._record("queued")
-        threading.Thread(target=self._run, args=(model_id, event), daemon=True, name="model-download").start()
+        threading.Thread(target=self._run, args=(model_id, event, token), daemon=True, name="model-download").start()
         return self.status(model_id)
     def cancel(self, model_id):
         with self.guard:
@@ -260,7 +279,7 @@ class DownloadManager:
             eta = (total - maximum) / speed if total and speed and speed > 1024 and total >= maximum else None
             self._set(model_id, downloadedBytes=maximum, totalBytes=total, progress=progress,
                       speedBytesPerSecond=speed, etaSeconds=eta if eta is None or eta < 604800 else None)
-    def _run(self, model_id, cancel_event):
+    def _run(self, model_id, cancel_event, token=None):
         temporary = download_dir(model_id); monitor_stop = threading.Event(); monitor = None
         try:
             with model_operation(model_id):
@@ -268,10 +287,11 @@ class DownloadManager:
                 present = _walk_size(temporary) if temporary.exists() else 0
                 required = max(64 * 1024 ** 2, int(max(0, estimated - present) * 1.2))
                 if available < required: raise ModelLifecycleError("DISK_SPACE_INSUFFICIENT", "磁盘空间不足", requiredBytes=required, availableBytes=available)
-                total = repository_total_bytes(model_id)
+                total = repository_total_bytes(model_id, token)
                 self._set(model_id, status="downloading", totalBytes=total, error=None, startedAt=int(time.time() * 1000))
                 monitor = threading.Thread(target=self._monitor, args=(model_id, temporary, total, monitor_stop), daemon=True); monitor.start()
-                download(model_id, temporary, cancel_event)
+                if token: download(model_id, temporary, cancel_event, token)
+                else: download(model_id, temporary, cancel_event)
                 if cancel_event.is_set(): raise InterruptedError("模型下载已取消")
                 self._set(model_id, status="verifying", progress=100 if total else None)
                 valid, reason = verify_structure(model_id, temporary)
@@ -287,8 +307,10 @@ class DownloadManager:
                       speedBytesPerSecond=None, etaSeconds=None, error={"code": exc.code, "message": str(exc), **exc.details})
         except Exception as exc:
             logger.exception("model download failed model=%s type=%s", model_id, type(exc).__name__)
+            gated = type(exc).__name__ in {"GatedRepoError", "RepositoryNotFoundError"} or getattr(getattr(exc, "response", None), "status_code", None) in (401, 403)
             self._set(model_id, status="error", progress=None, speedBytesPerSecond=None, etaSeconds=None,
-                      error={"code": "MODEL_DOWNLOAD_FAILED", "message": str(exc)})
+                      error={"code": "HF_AUTH_FAILED" if gated else "MODEL_DOWNLOAD_FAILED",
+                             "message": "Hugging Face 授权失败；请确认已接受模型条款且 Token 有效" if gated else str(exc)})
         finally:
             monitor_stop.set()
             if monitor: monitor.join(timeout=1)

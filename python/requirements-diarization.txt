@@ -1,0 +1,2 @@
+# Optional feature pack. Base Runtime intentionally does not install this file.
+pyannote.audio>=4.0,<5

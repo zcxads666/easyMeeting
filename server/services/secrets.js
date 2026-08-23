@@ -1,7 +1,7 @@
 import fsp from 'node:fs/promises';
 import path from 'node:path';
 
-export const SECRET_PATHS = ['llm.apiKey', 'asr.qwen.apiKey', 'asr.mimo.apiKey', 'asr.volc.token'];
+export const SECRET_PATHS = ['llm.apiKey', 'asr.qwen.apiKey', 'asr.mimo.apiKey', 'asr.volc.token', 'huggingFace.token'];
 
 export class InMemorySecretStore {
   constructor(initial = {}, backend = 'memory') { this.values = new Map(Object.entries(initial)); this.backend = backend; }
@@ -44,7 +44,8 @@ export class EnvironmentSecretStore {
 
 export const ENV_SECRET_KEYS = {
   'llm.apiKey': 'MEETING_LLM_API_KEY', 'asr.qwen.apiKey': 'MEETING_QWEN_API_KEY',
-  'asr.mimo.apiKey': 'MEETING_MIMO_API_KEY', 'asr.volc.token': 'MEETING_VOLC_TOKEN'
+  'asr.mimo.apiKey': 'MEETING_MIMO_API_KEY', 'asr.volc.token': 'MEETING_VOLC_TOKEN',
+  'huggingFace.token': 'MEETING_HUGGINGFACE_TOKEN'
 };
 
 let configuredStore = null;
@@ -74,7 +75,7 @@ export async function migratePlaintextSecrets(settings, store, persist) {
   }
   const sanitized = structuredClone(settings);
   for (const secretPath of SECRET_PATHS) setPath(sanitized, secretPath, '');
-  sanitized.schemaVersion = 3; sanitized.secretMigrationVersion = 1;
+  sanitized.schemaVersion = 4; sanitized.secretMigrationVersion = 1;
   await persist(sanitized);
   return sanitized;
 }

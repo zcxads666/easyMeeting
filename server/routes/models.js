@@ -63,7 +63,13 @@ router.get('/', async (req, res) => {
 router.get('/runtime/capabilities', (req, res) => proxy('/runtime/capabilities', req, res, { fresh: true }));
 router.get('/runtime/health', (req, res) => proxy('/runtime/health', req, res, { fresh: true }));
 router.get('/download/status', (req, res) => proxy('/models/download/status', req, res, { fresh: true }));
-router.post('/download', (req, res) => proxy('/models/download', req, res));
+router.post('/download', async (req, res) => {
+  const settings = await getSettings();
+  const body = { ...(req.body || {}) };
+  if (body.id === 'pyannote/speaker-diarization-community-1') body.token = settings.huggingFace?.token || null;
+  req.body = body;
+  return proxy('/models/download', req, res);
+});
 router.post('/download/cancel', (req, res) => proxy('/models/download/cancel', req, res));
 router.post('/verify', (req, res) => proxy('/models/verify', req, res));
 router.post('/switch', (req, res) => proxy('/models/switch', req, res));

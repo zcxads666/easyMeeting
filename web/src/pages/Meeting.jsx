@@ -20,6 +20,7 @@ export default function Meeting() {
   const [activeSegment, setActiveSegment] = useState(-1);
   const [alignmentLanguage, setAlignmentLanguage] = useState('zh');
   const [postTask, setPostTask] = useState(null);
+  const [speakerDrafts, setSpeakerDrafts] = useState({});
   const mediaRef = useRef(null);
   const playerRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -45,6 +46,7 @@ export default function Meeting() {
     connectSocket();
     api(`/meetings/${id}`).then(async (value) => {
       setMeeting(value);
+      setSpeakerDrafts(value.speakerLabels || {});
       setAlignmentLanguage(value.asr?.language || value.alignment?.language || 'zh');
       if (value.audioRef) {
         const token = await api(`/meetings/${id}/audio-token`, { method: 'POST' });
@@ -179,9 +181,35 @@ export default function Meeting() {
     } catch (e) { setError(e.message); }
   };
 
+  const runDiarization = async () => {
+    setError('');
+    try {
+      const { taskId } = await api(`/meetings/${id}/diarize`, { method: 'POST', body: {} });
+      setPostTask({ id: taskId, stage: 'queued', type: 'diarization' });
+      const timer = setInterval(async () => {
+        try {
+          const task = await api(`/tasks/${taskId}`); setPostTask({ ...task, type: 'diarization' });
+          if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+            clearInterval(timer);
+            if (task.status === 'completed') { const value = await api(`/meetings/${id}`); setMeeting(value); setSpeakerDrafts(value.speakerLabels || {}); }
+            else setError(task.error?.message || '说话人分离失败');
+          }
+        } catch (e) { clearInterval(timer); setError(e.message); }
+      }, 700);
+    } catch (e) { setError(e.message); }
+  };
+
+  const saveSpeaker = async (speaker) => {
+    try {
+      const value = await api(`/meetings/${id}/speakers`, { method: 'PATCH', body: { labels: { [speaker]: speakerDrafts[speaker] } } });
+      setMeeting(value);
+    } catch (e) { setError(e.message); }
+  };
+
   const downloadSubtitle = async (kind) => {
     try {
-      const response = await fetch(`${BASE_URL}/api/meetings/${id}/export/${kind}`, {
+      const speakerQuery = meeting?.diarization ? '?includeSpeaker=1' : '';
+      const response = await fetch(`${BASE_URL}/api/meetings/${id}/export/${kind}${speakerQuery}`, {
         headers: API_TOKEN ? { 'X-Meeting-Token': API_TOKEN } : {}
       });
       if (!response.ok) {
@@ -279,6 +307,19 @@ export default function Meeting() {
         </div>
       )}
 
+      {meeting.rawText && meeting.audioRef && (
+        <div className="card p-4 mb-6">
+          <div className="flex items-center gap-3"><span className="text-sm font-medium">说话人分离</span>
+            <button className="btn-secondary" onClick={runDiarization} disabled={postTask && !['completed','failed','cancelled'].includes(postTask.status)}>
+              {postTask?.type === 'diarization' && !['completed','failed','cancelled'].includes(postTask.status) ? taskStageLabel(postTask.stage) : meeting.diarization ? '重新运行' : '运行说话人分离'}
+            </button><span className="text-xs text-gray-400">{meeting.diarization ? `${meeting.diarization.speakerCount || 0} 位说话人 · ${meeting.diarization.speakerAttribution?.quality || 'unknown'}` : '未运行'}</span></div>
+          {Object.keys(meeting.speakerLabels || {}).length > 0 && <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 mt-3">
+            {Object.keys(meeting.speakerLabels).sort().map((speaker) => <label key={speaker} className="flex gap-2 items-center text-xs"><span className="w-24 text-gray-400">{speaker}</span>
+              <input className="input py-1" value={speakerDrafts[speaker] ?? meeting.speakerLabels[speaker]} onChange={(e) => setSpeakerDrafts((value) => ({ ...value, [speaker]: e.target.value }))} onBlur={() => saveSpeaker(speaker)} /></label>)}
+          </div>}
+        </div>
+      )}
+
       {/* 实时字幕 */}
       {recording && (
         <div className="card p-5 mb-6">
@@ -308,7 +349,7 @@ export default function Meeting() {
                 title={Number.isFinite(s.start) ? '点击跳转并播放' : '点击复制此句'}
               >
                 {Number.isFinite(s.start) && <button className="text-xs text-apple-blue shrink-0" onClick={(event) => { event.stopPropagation(); seekTo(s.start); }}>{formatClock(s.start)}</button>}
-                {s.speaker && <span className="text-xs px-2 py-0.5 h-fit rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{s.speaker}</span>}
+                {s.speaker && <span className="text-xs px-2 py-0.5 h-fit rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{meeting.speakerLabels?.[s.speaker] || s.speaker}</span>}
                 <p className="text-gray-700 dark:text-gray-300 leading-relaxed flex-1">{s.text}</p>
                 {copiedIdx === i && <span className="text-xs text-green-500 self-center shrink-0">已复制</span>}
               </div>
@@ -344,7 +385,8 @@ function uint8ToBase64(uint8) {
 
 function taskStageLabel(stage) {
   return ({ queued: '等待中', preparing: '准备中', probing: '读取音频', transcoding: '转码中',
-    loading_model: '加载模型', transcribing: '转写中', aligning: '对齐中', building_timeline: '构建时间轴', saving: '保存中', completed: '完成',
+    loading_model: '加载模型', transcribing: '转写中', aligning: '对齐中', building_timeline: '构建时间轴',
+    segmenting: '检测语音', embedding: '提取声纹', clustering: '聚类', attributing: '归属说话人', saving: '保存中', completed: '完成',
     failed: '失败', cancelled: '已取消' })[stage] || '处理中';
 }
 

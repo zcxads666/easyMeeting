@@ -177,6 +177,11 @@ export async function getSettings() {
       local: { ...DEFAULT_SETTINGS.asr.local, ...(saved.asr?.local || {}) }
     },
     correction: { ...DEFAULT_SETTINGS.correction, ...(saved.correction || {}) },
+    huggingFace: { ...DEFAULT_SETTINGS.huggingFace, ...(saved.huggingFace || {}) },
+    alignment: { ...DEFAULT_SETTINGS.alignment, ...(saved.alignment || {}) },
+    diarization: { ...DEFAULT_SETTINGS.diarization, ...(saved.diarization || {}) },
+    postProcessing: { ...DEFAULT_SETTINGS.postProcessing, ...(saved.postProcessing || {}) },
+    realtime: { ...DEFAULT_SETTINGS.realtime, ...(saved.realtime || {}) },
     ui: { ...DEFAULT_SETTINGS.ui, ...(saved.ui || {}) }
   };
   const secretStore = getSecretStore();
@@ -190,7 +195,7 @@ export async function getSettings() {
       if (envValue) setPath(merged, secretPath, envValue);
     }
   }
-  merged.schemaVersion = 3;
+  merged.schemaVersion = 4;
   return merged;
 }
 
@@ -201,6 +206,7 @@ export function redactSettings(s) {
   if (clone.asr?.qwen) clone.asr.qwen.apiKey = mask(clone.asr.qwen.apiKey);
   if (clone.asr?.mimo) clone.asr.mimo.apiKey = mask(clone.asr.mimo.apiKey);
   if (clone.asr?.volc) clone.asr.volc.token = mask(clone.asr.volc.token);
+  if (clone.huggingFace) clone.huggingFace.token = mask(clone.huggingFace.token);
   return clone;
 }
 
@@ -220,13 +226,19 @@ export async function saveSettings(patch) {
       local: { ...current.asr.local, ...(patch.asr?.local || {}) }
     },
     correction: { ...current.correction, ...(patch.correction || {}) },
+    huggingFace: { ...current.huggingFace, ...(patch.huggingFace || {}) },
+    alignment: { ...current.alignment, ...(patch.alignment || {}) },
+    diarization: { ...current.diarization, ...(patch.diarization || {}) },
+    postProcessing: { ...current.postProcessing, ...(patch.postProcessing || {}) },
+    realtime: { ...current.realtime, ...(patch.realtime || {}) },
     ui: { ...current.ui, ...(patch.ui || {}) }
   };
   next.llm.apiKey = resolveSecretUpdate(current.llm.apiKey, patch.llm?.apiKey);
   next.asr.qwen.apiKey = resolveSecretUpdate(current.asr.qwen.apiKey, patch.asr?.qwen?.apiKey);
   next.asr.mimo.apiKey = resolveSecretUpdate(current.asr.mimo.apiKey, patch.asr?.mimo?.apiKey);
   next.asr.volc.token = resolveSecretUpdate(current.asr.volc.token, patch.asr?.volc?.token);
-  next.schemaVersion = 3;
+  next.huggingFace.token = resolveSecretUpdate(current.huggingFace.token, patch.huggingFace?.token);
+  next.schemaVersion = 4;
   const secretStore = getSecretStore();
   if (secretStore) {
     for (const secretPath of SECRET_PATHS) {

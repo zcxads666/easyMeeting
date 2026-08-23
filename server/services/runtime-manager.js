@@ -1,7 +1,7 @@
 import * as python from './python.js';
 
 export class RuntimeManager {
-  constructor(adapter = python) { this.adapter = adapter; this.installPromise = null; this.status = 'checking'; this.error = null; }
+  constructor(adapter = python) { this.adapter = adapter; this.installPromise = null; this.featurePromises = new Map(); this.status = 'checking'; this.error = null; }
   async inspect() { const state = await this.adapter.inspectRuntime(); this.status = state.status; this.error = state.error || null; return state; }
   async install({ signal, onStage } = {}) {
     if (this.installPromise) return this.installPromise;
@@ -23,6 +23,12 @@ export class RuntimeManager {
   repair(options) { return this.install(options); }
   async start() { this.status = 'starting'; const ok = await this.adapter.spawnPython(); this.status = ok ? 'running' : 'error'; return this.inspect(); }
   async restart() { this.status = 'starting'; const ok = await this.adapter.restartRuntime(); this.status = ok ? 'running' : 'error'; return this.inspect(); }
+  installFeature(feature, options = {}) {
+    if (this.featurePromises.has(feature)) return this.featurePromises.get(feature);
+    const promise = this.adapter.installRuntimeFeature(feature, options)
+      .finally(() => this.featurePromises.delete(feature));
+    this.featurePromises.set(feature, promise); return promise;
+  }
 }
 
 export const runtimeManager = new RuntimeManager();

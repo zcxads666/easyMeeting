@@ -123,6 +123,12 @@ export default function Models() {
     } catch (e) { setError(e.message); }
   };
 
+  const installFeature = async (feature) => {
+    setError('');
+    try { const result = await api(`/runtime/features/${feature}/install`, { method: 'POST' }); if (result.taskId) setRuntimeTask(result.taskId); }
+    catch (e) { setError(e.message); }
+  };
+
   useEffect(() => {
     if (!runtimeTask) return;
     const timer = setInterval(async () => {
@@ -186,7 +192,7 @@ export default function Models() {
         </div>
       )}
 
-      {runtime && <RuntimePanel runtime={runtime} busy={Boolean(runtimeTask)} onAction={runtimeAction} />}
+      {runtime && <RuntimePanel runtime={runtime} busy={Boolean(runtimeTask)} onAction={runtimeAction} onInstallFeature={installFeature} />}
 
       <div className="card p-4 mb-6 flex items-center gap-3">
         <label className="text-sm text-gray-500">性能测试音频</label>
@@ -220,13 +226,18 @@ export default function Models() {
           {models.filter((m) => m.role === 'aligner' || m.kind === 'qwen-forced-aligner').map((m) => (
             <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onDelete={del} />
           ))}
+
+          <h2 className="font-semibold text-lg pt-4">说话人分离模型</h2>
+          {models.filter((m) => m.role === 'diarization').map((m) => (
+            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onDelete={del} />
+          ))}
         </div>
       )}
     </div>
   );
 }
 
-function RuntimePanel({ runtime: r, busy, onAction }) {
+function RuntimePanel({ runtime: r, busy, onAction, onInstallFeature }) {
   const labels = { not_installed: '未安装', checking: '正在检查', installing: '安装中', repairing: '修复中', ready: '可用', starting: '启动中', running: '运行中', broken: '需要修复', error: '错误', creating_environment: '创建环境', upgrading_pip: '准备依赖', installing_dependencies: '安装依赖', verifying: '验证中' };
   const available = Object.entries(r.devices || {}).filter(([, d]) => d.available).map(([name]) => name).join(' / ');
   return (
@@ -244,6 +255,12 @@ function RuntimePanel({ runtime: r, busy, onAction }) {
         <RuntimeItem label="FFmpeg" value={r.ffmpeg ? '可用' : '不可用'} />
       </div>
       {r.error?.message && <p className="text-xs text-red-500 mt-3">{r.error.message}</p>}
+      {['ready', 'running'].includes(r.status) && r.optionalFeatures && <div className="mt-4 pt-3 border-t border-black/5 dark:border-white/10 flex flex-wrap gap-2 items-center">
+        <span className="text-xs text-gray-400">可选功能</span>
+        <button className="btn-secondary !py-1.5 text-xs" disabled={busy || r.optionalFeatures.diarization?.available} onClick={() => onInstallFeature('diarization')}>
+          说话人分离 Runtime：{r.optionalFeatures.diarization?.available ? '已安装' : '安装'}
+        </button>
+      </div>}
     </div>
   );
 }

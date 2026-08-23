@@ -16,6 +16,7 @@ import { resolveMeetingAudio } from '../services/audio/access.js';
 import { runAlignment } from '../services/alignment.js';
 import { buildSrt, buildVtt, SubtitleError } from '../services/subtitles.js';
 import { MEETING_SCHEMA_VERSION } from '../services/timeline.js';
+import { runDiarization, renameSpeakers } from '../services/diarization.js';
 
 const router = Router();
 
@@ -136,6 +137,25 @@ router.post('/:id/align', async (req, res) => {
   const task = taskManager.create({ type: 'alignment', lane: 'local', metadata: { meetingId: meeting.id },
     run: (context) => runAlignment(meeting.id, req.body || {}, context) });
   return res.status(202).json({ taskId: task.id });
+});
+
+router.post('/:id/diarize', async (req, res) => {
+  const meeting = await getMeeting(req.params.id);
+  if (!meeting) return res.status(404).json({ error: '会议不存在', code: 'MEETING_NOT_FOUND' });
+  const settings = await getSettings();
+  const options = { ...settings.diarization, ...(req.body || {}) };
+  const task = taskManager.create({ type: 'diarization', lane: 'local', metadata: { meetingId: meeting.id },
+    run: (context) => runDiarization(meeting.id, options, context) });
+  return res.status(202).json({ taskId: task.id });
+});
+
+router.patch('/:id/speakers', async (req, res) => {
+  const meeting = await getMeeting(req.params.id);
+  if (!meeting) return res.status(404).json({ error: '会议不存在', code: 'MEETING_NOT_FOUND' });
+  try {
+    meeting.speakerLabels = renameSpeakers(meeting, req.body?.labels);
+    return res.json(await saveMeeting(meeting));
+  } catch (error) { return res.status(400).json({ error: error.message, code: error.code }); }
 });
 
 function exportSubtitles(kind) {
