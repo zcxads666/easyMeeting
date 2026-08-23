@@ -4,11 +4,15 @@ on:
   # GitHub Actions 页面手动运行
   workflow_dispatch:
 
-  # 打版本标签时自动构建
+  # 推送版本标签时自动构建
   # 例如：v0.1.0、v0.2.0
   push:
     tags:
       - "v*"
+
+# 当前工作流只需要读取仓库
+permissions:
+  contents: read
 
 jobs:
   build:
@@ -16,6 +20,7 @@ jobs:
 
     strategy:
       fail-fast: false
+
       matrix:
         include:
           - os: windows-latest
@@ -32,16 +37,20 @@ jobs:
     steps:
       # 1. 拉取仓库代码
       - name: Checkout repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
-      # 2. 安装 Node.js
+      # 2. 安装项目使用的 Node.js
+      #
+      # 注意：
+      # 这里的 Node 22 是 easyMeeting 自己运行 npm/build 时使用的版本。
+      # 和 GitHub Actions 内部使用 Node 24 是两回事。
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@v7
         with:
           node-version: 22
           cache: npm
 
-      # 3. 安装 npm 依赖
+      # 3. 安装依赖
       - name: Install dependencies
         run: npm ci
 
@@ -50,14 +59,16 @@ jobs:
         run: npm run build
 
       # 5. Electron 桌面端打包
-      # --publish never 防止 electron-builder
-      # 在 CI 环境下自动尝试发布 GitHub Release
+      #
+      # --publish never：
+      # 禁止 electron-builder 在 CI 环境自动尝试发布 GitHub Release，
+      # 避免因为没有 GH_TOKEN 导致打包成功后 CI 反而失败。
       - name: Build Desktop
         run: npm run desktop:dist -- --publish never
 
-      # 6. 上传打包结果到 GitHub Actions Artifacts
+      # 6. 上传构建产物
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: MeetingNotes-${{ matrix.name }}
           path: release/desktop/**
