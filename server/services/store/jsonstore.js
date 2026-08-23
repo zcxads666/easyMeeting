@@ -5,6 +5,9 @@ import { randomBytes } from 'node:crypto';
 import {
   DATA_DIR, MEETINGS_DIR, UPLOADS_DIR, TRASH_DIR, SETTINGS_FILE, DEFAULT_SETTINGS
 } from '../../config.js';
+import { SECRET_PATHS, ENV_SECRET_KEYS, getSecretStore, getPath, setPath,
+  isMaskedSecret, resolveSecretUpdate, migratePlaintextSecrets } from '../secrets.js';
+import { migrateSettings, validateSettingsPatch } from '../settings-schema.js';
 
 export function ensureDirs() {
   for (const dir of [DATA_DIR, MEETINGS_DIR, UPLOADS_DIR, TRASH_DIR]) {
@@ -152,7 +155,8 @@ export async function getSettings() {
     if (e.code === 'SETTINGS_CORRUPT') throw e;
     if (e.code !== 'ENOENT') throw e;
   }
-  return {
+  saved = migrateSettings(saved);
+  const merged = {
     ...structuredClone(DEFAULT_SETTINGS),
     ...saved,
     llm: { ...DEFAULT_SETTINGS.llm, ...(saved.llm || {}) },
@@ -167,15 +171,19 @@ export async function getSettings() {
     correction: { ...DEFAULT_SETTINGS.correction, ...(saved.correction || {}) },
     ui: { ...DEFAULT_SETTINGS.ui, ...(saved.ui || {}) }
   };
-}
-
-function isMaskedSecret(v) {
-  return typeof v === 'string' && (/^\*+$/.test(v) || /^•+$/.test(v));
-}
-
-function pickSecret(curr, incoming) {
-  if (incoming == null || isMaskedSecret(incoming)) return curr || '';
-  return incoming;
+  const secretStore = getSecretStore();
+  if (secretStore) {
+    saved = await migratePlaintextSecrets(saved, secretStore, (sanitized) => atomicWrite(SETTINGS_FILE, sanitized));
+    for (const secretPath of SECRET_PATHS) setPath(merged, secretPath, await secretStore.get(secretPath));
+    merged.secretMigrationVersion = Math.max(Number(saved.secretMigrationVersion) || 0, 1);
+  } else {
+    for (const secretPath of SECRET_PATHS) {
+      const envValue = process.env[ENV_SECRET_KEYS[secretPath]];
+      if (envValue) setPath(merged, secretPath, envValue);
+    }
+  }
+  merged.schemaVersion = 3;
+  return merged;
 }
 
 export function redactSettings(s) {
@@ -189,6 +197,7 @@ export function redactSettings(s) {
 }
 
 export async function saveSettings(patch) {
+  validateSettingsPatch(patch);
   const current = await getSettings();
   const next = {
     ...current,
@@ -205,11 +214,24 @@ export async function saveSettings(patch) {
     correction: { ...current.correction, ...(patch.correction || {}) },
     ui: { ...current.ui, ...(patch.ui || {}) }
   };
-  next.llm.apiKey = pickSecret(current.llm.apiKey, patch.llm?.apiKey);
-  next.asr.qwen.apiKey = pickSecret(current.asr.qwen.apiKey, patch.asr?.qwen?.apiKey);
-  next.asr.mimo.apiKey = pickSecret(current.asr.mimo.apiKey, patch.asr?.mimo?.apiKey);
-  next.asr.volc.token = pickSecret(current.asr.volc.token, patch.asr?.volc?.token);
+  next.llm.apiKey = resolveSecretUpdate(current.llm.apiKey, patch.llm?.apiKey);
+  next.asr.qwen.apiKey = resolveSecretUpdate(current.asr.qwen.apiKey, patch.asr?.qwen?.apiKey);
+  next.asr.mimo.apiKey = resolveSecretUpdate(current.asr.mimo.apiKey, patch.asr?.mimo?.apiKey);
+  next.asr.volc.token = resolveSecretUpdate(current.asr.volc.token, patch.asr?.volc?.token);
+  next.schemaVersion = 3;
+  const secretStore = getSecretStore();
+  if (secretStore) {
+    for (const secretPath of SECRET_PATHS) {
+      const incoming = getPath(patch, secretPath);
+      if (incoming == null || isMaskedSecret(incoming)) continue;
+      if (incoming === '') await secretStore.delete(secretPath); else await secretStore.set(secretPath, incoming);
+      const expected = incoming || '';
+      if (await secretStore.get(secretPath) !== expected) throw new Error(`secret write verification failed: ${secretPath}`);
+    }
+    for (const secretPath of SECRET_PATHS) setPath(next, secretPath, '');
+    next.secretMigrationVersion = 1;
+  }
   await ensureDirs();
   await writeJson(SETTINGS_FILE, next);
-  return next;
+  return secretStore ? getSettings() : next;
 }

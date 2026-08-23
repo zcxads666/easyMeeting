@@ -1,7 +1,8 @@
-import { app, BrowserWindow, shell, dialog } from 'electron';
+import { app, BrowserWindow, shell, dialog, safeStorage } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { isAllowedRendererNavigation, isSafeExternalUrl } from './security.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.argv.includes('--dev');
@@ -35,18 +36,27 @@ if (!gotLock) {
 }
 
 async function bootstrap() {
+  await app.whenReady();
   // 必须在 import server 模块之前设置数据目录环境变量：
   // server 模块顶层会基于 DATA_DIR 创建 multer 存储目录（见 routes/meetings.js），
   // 打包后 app.asar 是只读的，若仍指向 ROOT/data 会在加载时崩溃。
   if (!isDev) {
     // Python venv 放到 userData（unpacked 目录在 Windows Program Files 下不可写）
-    process.env.MEETING_VENV_DIR ||= path.join(app.getPath('userData'), 'python-venv');
+    process.env.MEETING_VENV_DIR ||= path.join(app.getPath('userData'), 'runtime', 'python');
     process.env.MEETING_DATA_DIR ||= path.join(app.getPath('userData'), 'data');
+    process.env.MEETING_RUNTIME_AUTO_INSTALL = '0';
   }
 
   // 动态 import：确保上面环境变量设置先于 server 模块加载
   const { createServer } = await import('../server/index.js');
   const python = await import('../server/services/python.js');
+  const { EncryptedFileSecretStore, configureSecretStore } = await import('../server/services/secrets.js');
+  configureSecretStore(new EncryptedFileSecretStore({
+    file: path.join(app.getPath('userData'), 'secrets.json'),
+    encrypt: (value) => safeStorage.encryptString(value),
+    decrypt: (value) => safeStorage.decryptString(value),
+    available: () => safeStorage.isEncryptionAvailable()
+  }));
   stopPython = python.stopPython;
 
   // 内嵌会议服务（随机端口，仅监听 127.0.0.1，纯内部通信通道）
@@ -55,10 +65,8 @@ async function bootstrap() {
   apiToken = srv.apiToken;
   console.log(`[electron] meeting server on 127.0.0.1:${serverPort}`);
 
-  // 后台拉起 Python 推理服务（不阻塞）
+  // 生产模式只启动已经安装且验证通过的 Runtime，不执行 pip install。
   python.spawnPython().catch(() => {});
-
-  await app.whenReady();
   createWindow();
 
   app.on('activate', () => {
@@ -79,7 +87,7 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
-      sandbox: false,
+      sandbox: true,
       additionalArguments: [
         `--meeting-base-url=${baseUrl}`,
         `--meeting-api-token=${apiToken}`,
@@ -88,10 +96,13 @@ function createWindow() {
     }
   });
 
-  // 外部链接一律交给系统浏览器
+  const distRoot = path.join(__dirname, '..', 'web', 'dist');
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
-    shell.openExternal(url);
+    if (isSafeExternalUrl(url)) shell.openExternal(url);
     return { action: 'deny' };
+  });
+  mainWindow.webContents.on('will-navigate', (event, url) => {
+    if (!isAllowedRendererNavigation(url, { isDev, devUrl: DEV_URL, baseUrl, distRoot })) event.preventDefault();
   });
 
   if (isDev) {
@@ -119,7 +130,7 @@ function createWindow() {
         const bridge = await mainWindow.webContents.executeJavaScript(
           'JSON.stringify(window.meetingBridge || {})'
         );
-        console.log('[smoke] bridge:', bridge);
+        console.log('[smoke] bridge available:', Boolean(JSON.parse(bridge).baseUrl));
         // 渲染进程 API 连通
         const health = await mainWindow.webContents.executeJavaScript(
           `fetch('${baseUrl}/api/health', { headers: { 'X-Meeting-Token': window.meetingBridge?.apiToken || '' } }).then(r => r.json()).then(JSON.stringify)`

@@ -51,6 +51,7 @@ const VENV_PYTHON = os.platform() === 'win32'
 
 // 依赖完整性检查（覆盖推理与模型下载所需核心包）
 const CORE_IMPORTS = ['fastapi', 'uvicorn', 'numpy', 'faster_whisper', 'transformers', 'modelscope', 'torch'];
+const AUTO_INSTALL = process.env.MEETING_RUNTIME_AUTO_INSTALL !== '0';
 
 async function exists(p) {
   try { await access(p); return true; } catch { return false; }
@@ -70,13 +71,14 @@ async function findSystemPython() {
   return null;
 }
 
-async function pipInstall(pythonBin, args) {
+async function pipInstall(pythonBin, args, signal) {
   await new Promise((resolve, reject) => {
     const p = spawn(pythonBin, ['-m', 'pip', 'install', ...args], { stdio: ['ignore', 'pipe', 'pipe'] });
     p.stdout.on('data', (d) => process.stdout.write(`[pip] ${d}`));
     p.stderr.on('data', (d) => process.stdout.write(`[pip] ${d}`));
     p.on('error', reject);
     p.on('close', (code) => code === 0 ? resolve() : reject(new Error(`pip 安装失败 (exit ${code})`)));
+    signal?.addEventListener('abort', () => { p.kill(); reject(Object.assign(new Error('Runtime 安装已取消'), { name: 'AbortError' })); }, { once: true });
   });
 }
 
@@ -88,15 +90,17 @@ async function readRequirements() {
 }
 
 // 确保虚拟环境存在且依赖可用，返回 venv 内 python 路径
-async function ensureVenv() {
+async function ensureVenv({ allowInstall = AUTO_INSTALL, signal, onStage = () => {} } = {}) {
   if (await exists(VENV_PYTHON)) {
     // 检查核心依赖是否齐全
     try {
       await execFileAsync(VENV_PYTHON, ['-c', `import ${CORE_IMPORTS.join(',')}`]);
       return VENV_PYTHON;
-    } catch {
+    } catch (error) {
+      if (!allowInstall) throw Object.assign(new Error('AI Runtime 依赖不完整，请在应用中执行修复'), { code: 'RUNTIME_BROKEN', cause: error });
+      onStage('installing_dependencies');
       console.log('[python] venv 缺少依赖，正在安装（首次可能需要几分钟，请耐心等待）…');
-      await pipInstall(VENV_PYTHON, await readRequirements());
+      await pipInstall(VENV_PYTHON, await readRequirements(), signal);
       return VENV_PYTHON;
     }
   }
@@ -104,13 +108,16 @@ async function ensureVenv() {
   // 创建虚拟环境
   const systemPython = await findSystemPython();
   if (!systemPython) {
-    console.error('[python] 未找到 Python 3.9+，请先安装 Python（https://www.python.org/downloads/）');
-    return null;
+    throw Object.assign(new Error('未找到 Python 3.10+，请先安装 Python'), { code: 'PYTHON_NOT_FOUND' });
   }
+  if (!allowInstall) throw Object.assign(new Error('本地 AI Runtime 尚未安装'), { code: 'RUNTIME_NOT_INSTALLED' });
+  onStage('creating_environment');
   console.log(`[python] 使用 ${systemPython} 创建虚拟环境 ${VENV_DIR} …`);
   await execFileAsync(systemPython, ['-m', 'venv', VENV_DIR]);
-  console.log('[python] 正在安装依赖（首次可能需要几分钟，请耐心等待）…');
-  await pipInstall(VENV_PYTHON, ['--upgrade', 'pip', ...(await readRequirements())]);
+  onStage('upgrading_pip');
+  await pipInstall(VENV_PYTHON, ['--upgrade', 'pip'], signal);
+  onStage('installing_dependencies');
+  await pipInstall(VENV_PYTHON, await readRequirements(), signal);
   return VENV_PYTHON;
 }
 
@@ -145,7 +152,7 @@ function waitChildExit(target, timeoutMs = 3000) {
 async function launch() {
   let pythonBin;
   try {
-    pythonBin = await ensureVenv();
+    pythonBin = await ensureVenv({ allowInstall: AUTO_INSTALL });
   } catch (e) {
     console.error('[python] 环境准备失败:', e.message);
     console.error('[python] 请手动运行: npm run setup:python');
@@ -236,6 +243,28 @@ export async function spawnPython() {
   return waitHealthy(30000);
 }
 
+export async function inspectRuntime() {
+  if (!(await exists(VENV_PYTHON))) return { status: 'not_installed', runtimePath: VENV_DIR, error: null };
+  try {
+    const { stdout } = await execFileAsync(VENV_PYTHON, ['-c', `import ${CORE_IMPORTS.join(',')}; import sys; print(sys.version.split()[0])`]);
+    return { status: await isHealthy() ? 'running' : 'ready', python: stdout.trim(), runtimePath: VENV_DIR, error: null };
+  } catch (error) {
+    return { status: 'broken', runtimePath: VENV_DIR, error: { code: 'RUNTIME_VERIFY_FAILED', message: error.message } };
+  }
+}
+
+export async function installRuntime({ signal, onStage } = {}) {
+  onStage?.('preparing');
+  await ensureVenv({ allowInstall: true, signal, onStage });
+  onStage?.('verifying');
+  const state = await inspectRuntime();
+  if (!['ready', 'running'].includes(state.status)) throw Object.assign(new Error('Runtime 验证失败'), { code: 'RUNTIME_VERIFY_FAILED' });
+  return state;
+}
+
+export async function restartRuntime() { return restartPython(15000); }
+export function runtimePaths() { return { runtimePath: VENV_DIR, sourcePath: PY_DIR }; }
+
 export function stopPython() {
   intentionalKill = true;
   shouldRun = false;
@@ -264,6 +293,13 @@ export async function getRuntimeHealth() {
     return { daemon: false, dependencies: { ok: false }, ffmpeg: { available: false },
       modelRuntime: { available: false }, error: `${e.name}: ${e.message}` };
   }
+}
+
+export async function getRuntimeCapabilities() {
+  try {
+    const res = await fetch(`${getPythonUrl()}/runtime/capabilities`, { signal: AbortSignal.timeout(3000) });
+    return res.ok ? await res.json() : null;
+  } catch { return null; }
 }
 
 // 是否有模型下载任务进行中（下载期间重启 Python 会中断下载线程）

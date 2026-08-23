@@ -5,7 +5,7 @@ import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Server } from 'socket.io';
-import { PORT, ROOT, UPLOADS_DIR } from './config.js';
+import { PORT, ROOT } from './config.js';
 import { ensureDirs } from './services/store/jsonstore.js';
 import { taskManager } from './services/queue.js';
 import meetingsRoute from './routes/meetings.js';
@@ -13,6 +13,8 @@ import settingsRoute from './routes/settings.js';
 import modelsRoute from './routes/models.js';
 import llmRoute from './routes/llm.js';
 import tasksRoute from './routes/tasks.js';
+import runtimeRoute from './routes/runtime.js';
+import { createDiagnosticsRoute } from './routes/diagnostics.js';
 import { setupRealtime } from './socket/realtime.js';
 import { spawnPython, getRuntimeHealth } from './services/python.js';
 import { checkFFmpeg } from './services/audio/ffmpeg.js';
@@ -81,7 +83,10 @@ export function createServer(options = {}) {
   app.use('/api/models', modelsRoute);
   app.use('/api/llm', llmRoute);
   app.use('/api/tasks', tasksRoute);
-  app.use('/uploads', express.static(UPLOADS_DIR));
+  app.use('/api/runtime', runtimeRoute);
+  let appVersion = 'unknown';
+  try { appVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { /* optional metadata */ }
+  app.use('/api/diagnostics', createDiagnosticsRoute({ appVersion, authEnabled: Boolean(apiToken) }));
 
   const dist = path.join(ROOT, 'web', 'dist');
   app.use(express.static(dist, { index: false }));
@@ -98,7 +103,9 @@ export function createServer(options = {}) {
     try {
       let html = fs.readFileSync(index, 'utf8');
       if (apiToken) {
-        const inject = `<script>window.meetingBridge=Object.assign({},window.meetingBridge||{},{apiToken:${JSON.stringify(apiToken)}})</script>`;
+        const nonce = randomBytes(18).toString('base64');
+        html = html.replace("script-src 'self'", `script-src 'self' 'nonce-${nonce}'`);
+        const inject = `<script nonce="${nonce}">window.meetingBridge=Object.assign({},window.meetingBridge||{},{apiToken:${JSON.stringify(apiToken)}})</script>`;
         html = html.includes('<head>') ? html.replace('<head>', `<head>${inject}`) : inject + html;
       }
       res.type('html').send(html);

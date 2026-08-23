@@ -11,6 +11,8 @@ import { transcribeFile } from '../services/asr/index.js';
 import { taskManager } from '../services/queue.js';
 import { getSettings } from '../services/store/jsonstore.js';
 import { UPLOADS_DIR } from '../config.js';
+import { mimeFor } from '../services/audio/ffmpeg.js';
+import fsp from 'node:fs/promises';
 
 const router = Router();
 
@@ -39,6 +41,40 @@ router.get('/:id', async (req, res) => {
   const m = await getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: 'not found' });
   res.json(m);
+});
+
+router.get('/:id/audio', async (req, res) => {
+  const meeting = await getMeeting(req.params.id);
+  if (!meeting) return res.status(404).json({ error: 'meeting not found' });
+  if (!meeting.audioRef) return res.status(404).json({ error: 'audio not found' });
+  try {
+    const [root, audio] = await Promise.all([fsp.realpath(UPLOADS_DIR), fsp.realpath(path.resolve(meeting.audioRef))]);
+    const relative = path.relative(root, audio);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return res.status(403).json({ error: 'invalid audio path' });
+    const stat = await fsp.stat(audio);
+    if (!stat.isFile()) return res.status(404).json({ error: 'audio not found' });
+    const range = req.get('range');
+    res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Content-Type', mimeFor(audio));
+    if (!range) {
+      res.setHeader('Content-Length', stat.size); return fs.createReadStream(audio).pipe(res);
+    }
+    const match = /^bytes=(\d*)-(\d*)$/.exec(range);
+    if (!match) { res.setHeader('Content-Range', `bytes */${stat.size}`); return res.sendStatus(416); }
+    let start = match[1] === '' ? null : Number(match[1]);
+    let end = match[2] === '' ? null : Number(match[2]);
+    if (start == null) { const suffix = end; if (!suffix || suffix < 1) return res.sendStatus(416); start = Math.max(0, stat.size - suffix); end = stat.size - 1; }
+    else end = end == null ? stat.size - 1 : end;
+    if (!Number.isSafeInteger(start) || !Number.isSafeInteger(end) || start < 0 || start >= stat.size || end < start) {
+      res.setHeader('Content-Range', `bytes */${stat.size}`); return res.sendStatus(416);
+    }
+    end = Math.min(end, stat.size - 1);
+    res.status(206); res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
+    res.setHeader('Content-Length', end - start + 1); return fs.createReadStream(audio, { start, end }).pipe(res);
+  } catch (error) {
+    if (error.code === 'ENOENT') return res.status(404).json({ error: 'audio not found' });
+    console.error('[security] audio access failed:', error.message);
+    return res.status(500).json({ error: 'audio access failed' });
+  }
 });
 
 // 新建

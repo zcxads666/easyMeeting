@@ -30,7 +30,9 @@ router.get('/', async (_req, res) => {
     res.json(redactSettings(await getSettings()));
   } catch (e) {
     if (e.code === 'SETTINGS_CORRUPT') return res.status(500).json({ error: e.message });
-    throw e;
+    if (e.code === 'INVALID_SETTINGS') return res.status(400).json({ error: e.message, code: e.code });
+    console.error('[security] settings read failed:', e.message);
+    return res.status(500).json({ error: '无法读取安全设置', code: 'SETTINGS_READ_FAILED' });
   }
 });
 
@@ -39,7 +41,9 @@ router.patch('/', async (req, res) => {
     res.json(redactSettings(await saveSettings(req.body)));
   } catch (e) {
     if (e.code === 'SETTINGS_CORRUPT') return res.status(500).json({ error: e.message });
-    throw e;
+    if (e.code === 'INVALID_SETTINGS') return res.status(400).json({ error: e.message, code: e.code });
+    console.error('[security] settings save failed:', e.message);
+    return res.status(500).json({ error: '无法保存安全设置', code: 'SETTINGS_SAVE_FAILED' });
   }
 });
 

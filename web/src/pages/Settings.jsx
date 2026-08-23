@@ -15,6 +15,8 @@ export default function Settings() {
   const [testMsg, setTestMsg] = useState('');
   const [asrTestMsg, setAsrTestMsg] = useState('');
   const [savedSection, setSavedSection] = useState('');
+  const [diagnostics, setDiagnostics] = useState(null);
+  const [diagnosticMsg, setDiagnosticMsg] = useState('');
 
   useEffect(() => { loadSettings().then(() => setForm(useStore.getState().settings)); }, []);
   useEffect(() => { setForm(settings); }, [settings]);
@@ -51,6 +53,16 @@ export default function Settings() {
       const r = await api('/settings/asr/test', { method: 'POST', body: form });
       setAsrTestMsg('✅ ' + (r.message || '连接成功'));
     } catch (e) { setAsrTestMsg('❌ ' + e.message); }
+  };
+
+  const refreshDiagnostics = async () => {
+    setDiagnosticMsg('读取中…');
+    try { setDiagnostics(await api('/diagnostics')); setDiagnosticMsg(''); }
+    catch (e) { setDiagnosticMsg('读取失败：' + e.message); }
+  };
+  const copyDiagnostics = async () => {
+    try { await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)); setDiagnosticMsg('✓ 已复制'); }
+    catch (e) { setDiagnosticMsg('复制失败：' + e.message); }
   };
 
   return (
@@ -144,6 +156,16 @@ export default function Settings() {
           <p className="text-sm text-gray-400 dark:text-gray-500">切换明暗主题</p>
         </div>
         <Toggle checked={form.ui.theme === 'dark'} onChange={(v) => set('ui', 'theme', v ? 'dark' : 'light')} />
+      </section>
+
+      <section className="card p-6 mb-6">
+        <div className="flex items-center justify-between gap-3">
+          <div><h2 className="font-semibold">诊断</h2><p className="text-sm text-gray-400">仅包含脱敏后的应用、运行环境和设备状态</p></div>
+          <div className="flex gap-2"><button className="btn-secondary" onClick={refreshDiagnostics}>刷新</button>
+            <button className="btn-secondary" disabled={!diagnostics} onClick={copyDiagnostics}>复制诊断信息</button></div>
+        </div>
+        {diagnosticMsg && <p className="text-sm mt-3 text-gray-500">{diagnosticMsg}</p>}
+        {diagnostics && <pre className="mt-4 p-3 rounded-lg bg-gray-100 dark:bg-black/20 text-xs overflow-auto max-h-72">{JSON.stringify(diagnostics, null, 2)}</pre>}
       </section>
 
       <button className="btn-primary w-full" onClick={saveAll}>

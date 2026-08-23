@@ -71,6 +71,10 @@ jobs:
       - name: Build Web
         run: npm run build
 
+      - name: Electron smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a env ELECTRON_SMOKE_TEST=1 timeout 60s npm run desktop
+
       # 5. Electron 桌面端打包
       #
       # --publish never：

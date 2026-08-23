@@ -10,6 +10,7 @@ export default function Models() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [runtime, setRuntime] = useState(null);
+  const [runtimeTask, setRuntimeTask] = useState(null);
   const settings = useStore((s) => s.settings);
   const pollRef = useRef(null);
   const retryTimerRef = useRef(null);
@@ -19,11 +20,12 @@ export default function Models() {
   const load = useCallback(async (retries = 3, silent = false) => {
     if (!silent) setLoading(true);
     try {
+      const runtimeState = await api('/runtime');
+      setRuntime(runtimeState);
+      if (!['ready', 'running'].includes(runtimeState.status)) {
+        setModels([]); setDiskUsage(0); setError(''); return;
+      }
       const data = await api('/models');
-      const [capabilities, health] = await Promise.all([
-        api('/models/runtime/capabilities'), api('/models/runtime/health')
-      ]);
-      setRuntime({ capabilities, health });
       setModels(data.models || []);
       setDiskUsage(data.disk_usage || 0);
       setError('');
@@ -104,6 +106,30 @@ export default function Models() {
     } catch (e) { setError(e.message); }
   };
 
+  const runtimeAction = async (action) => {
+    setError('');
+    try {
+      const result = await api(`/runtime/${action}`, { method: 'POST' });
+      if (result.taskId) setRuntimeTask(result.taskId); else await load(0, true);
+    } catch (e) { setError(e.message); }
+  };
+
+  useEffect(() => {
+    if (!runtimeTask) return;
+    const timer = setInterval(async () => {
+      try {
+        const task = await api(`/tasks/${runtimeTask}`);
+        setRuntime((r) => ({ ...(r || {}), status: task.status === 'running' ? task.stage : r?.status }));
+        if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+          clearInterval(timer); setRuntimeTask(null);
+          if (task.status === 'failed') setError(task.error?.message || 'Runtime 安装失败');
+          await load(0, true);
+        }
+      } catch (e) { clearInterval(timer); setRuntimeTask(null); setError(e.message); }
+    }, 1000);
+    return () => clearInterval(timer);
+  }, [runtimeTask, load]);
+
   const current = settings?.asr?.local?.model;
 
   return (
@@ -129,7 +155,7 @@ export default function Models() {
         </div>
       )}
 
-      {runtime && <RuntimePanel runtime={runtime} />}
+      {runtime && <RuntimePanel runtime={runtime} busy={Boolean(runtimeTask)} onAction={runtimeAction} />}
 
       {loading ? (
         <p className="text-center text-gray-400 py-16">加载模型列表…</p>
@@ -156,22 +182,24 @@ export default function Models() {
   );
 }
 
-function RuntimePanel({ runtime: { capabilities: c, health: h } }) {
-  const available = Object.entries(c.devices || {}).filter(([, d]) => d.available).map(([name]) => name).join(' / ');
+function RuntimePanel({ runtime: r, busy, onAction }) {
+  const labels = { not_installed: '未安装', checking: '正在检查', installing: '安装中', repairing: '修复中', ready: '可用', starting: '启动中', running: '运行中', broken: '需要修复', error: '错误', creating_environment: '创建环境', upgrading_pip: '准备依赖', installing_dependencies: '安装依赖', verifying: '验证中' };
+  const available = Object.entries(r.devices || {}).filter(([, d]) => d.available).map(([name]) => name).join(' / ');
   return (
     <div className="card p-5 mb-6">
-      <h2 className="font-semibold">运行环境</h2>
+      <div className="flex items-center justify-between gap-3"><div><h2 className="font-semibold">本地 AI 运行环境</h2><p className="text-sm text-gray-400">{labels[r.status] || r.status}</p></div>
+        <div className="flex gap-2">{r.status === 'not_installed' && <button className="btn-primary" disabled={busy} onClick={() => onAction('install')}>安装</button>}
+          {['broken', 'error'].includes(r.status) && <button className="btn-primary" disabled={busy} onClick={() => onAction('repair')}>修复</button>}
+          {['ready', 'running'].includes(r.status) && <button className="btn-secondary" disabled={busy} onClick={() => onAction('restart')}>重启</button>}</div></div>
       <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-sm">
-        <RuntimeItem label="Python" value={c.python || '未检测'} />
-        <RuntimeItem label="PyTorch" value={c.torch || '未安装'} />
-        <RuntimeItem label="Transformers" value={c.transformers || '未安装'} />
+        <RuntimeItem label="Python" value={r.python || '未检测'} />
+        <RuntimeItem label="PyTorch" value={r.torch || '未安装'} />
+        <RuntimeItem label="Transformers" value={r.transformers || '未安装'} />
         <RuntimeItem label="设备" value={available || '无'} />
-        <RuntimeItem label="依赖" value={h.dependencies?.ok ? '完整' : '不完整'} />
-        <RuntimeItem label="FFmpeg" value={h.ffmpeg?.available ? '可用' : '不可用'} />
-        <RuntimeItem label="模型 Runtime" value={h.modelRuntime?.available ? '可用' : '不可用'} />
-        <RuntimeItem label="平台" value={c.machine || c.platform || '未知'} />
+        <RuntimeItem label="依赖" value={r.dependencies?.ok ? '完整' : '未验证'} />
+        <RuntimeItem label="FFmpeg" value={r.ffmpeg ? '可用' : '不可用'} />
       </div>
-      {h.modelRuntime?.error && <p className="text-xs text-red-500 mt-3">{h.modelRuntime.error}</p>}
+      {r.error?.message && <p className="text-xs text-red-500 mt-3">{r.error.message}</p>}
     </div>
   );
 }

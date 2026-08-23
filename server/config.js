@@ -27,6 +27,8 @@ export const PORT = process.env.PORT || 3000;
 export const BIND_HOST = process.env.MEETING_BIND_HOST || '127.0.0.1';
 
 export const DEFAULT_SETTINGS = {
+  schemaVersion: 3,
+  secretMigrationVersion: 0,
   llm: { baseUrl: '', apiKey: '', model: '', temperature: 0.3 },
   asr: {
     provider: 'qwen',

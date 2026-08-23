@@ -171,6 +171,33 @@ test('验收2: 设置读写 + provider 切换持久化', async () => {
   await api('PATCH', '/api/settings', { asr: { provider: 'qwen' } });
 });
 
+test('P2A: 音频端点鉴权、Range 与路径边界', async () => {
+  const { data: m } = await api('POST', '/api/meetings', { title: 'audio security' });
+  const uploads = path.join(TEST_DATA_DIR, 'uploads'); await fsp.mkdir(uploads, { recursive: true });
+  const audio = path.join(uploads, 'fixture.wav'); await fsp.writeFile(audio, Buffer.from('0123456789'));
+  await api('PATCH', `/api/meetings/${m.id}`, { audioRef: audio });
+  const unauthorized = await fetch(`${BASE}/api/meetings/${m.id}/audio`); assert.equal(unauthorized.status, 401);
+  const full = await fetch(`${BASE}/api/meetings/${m.id}/audio`, { headers: { 'X-Meeting-Token': API_TOKEN } });
+  assert.equal(full.status, 200); assert.equal(full.headers.get('content-length'), '10'); assert.equal(await full.text(), '0123456789');
+  const range = await fetch(`${BASE}/api/meetings/${m.id}/audio`, { headers: { 'X-Meeting-Token': API_TOKEN, Range: 'bytes=2-5' } });
+  assert.equal(range.status, 206); assert.equal(range.headers.get('content-range'), 'bytes 2-5/10'); assert.equal(await range.text(), '2345');
+  const malformed = await fetch(`${BASE}/api/meetings/${m.id}/audio`, { headers: { 'X-Meeting-Token': API_TOKEN, Range: 'items=1-2' } }); assert.equal(malformed.status, 416);
+  const outside = path.join(TEST_DATA_DIR, 'outside.wav'); await fsp.writeFile(outside, 'private');
+  await api('PATCH', `/api/meetings/${m.id}`, { audioRef: outside });
+  const denied = await fetch(`${BASE}/api/meetings/${m.id}/audio`, { headers: { 'X-Meeting-Token': API_TOKEN } }); assert.equal(denied.status, 403);
+  await api('PATCH', `/api/meetings/${m.id}`, { audioRef: path.join(uploads, '..', 'outside.wav') });
+  const traversal = await fetch(`${BASE}/api/meetings/${m.id}/audio`, { headers: { 'X-Meeting-Token': API_TOKEN } }); assert.equal(traversal.status, 403);
+  await api('DELETE', `/api/meetings/${m.id}`);
+});
+
+test('P2A: settings validation 与脱敏 diagnostics', async () => {
+  const invalid = await api('PATCH', '/api/settings', { asr: { provider: 'invalid' } }); assert.equal(invalid.res.status, 400);
+  const unknown = await api('PATCH', '/api/settings', { unexpected: true }); assert.equal(unknown.res.status, 400);
+  const { res, data } = await api('GET', '/api/diagnostics'); assert.equal(res.status, 200);
+  assert.ok(data.app.node); assert.ok(data.runtime); assert.ok(data.asr); assert.ok(data.security);
+  const serialized = JSON.stringify(data); assert.doesNotMatch(serialized, /apiKey|Authorization|transcript|audioRef/);
+});
+
 test('验收3: 模型代理路由（不下载真实模型）', async () => {
   const { res, data } = await api('GET', '/api/models');
   if (res.status === 502) {

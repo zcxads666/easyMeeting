@@ -101,5 +101,5 @@ function positiveInt(value, fallback) {
 
 export const taskManager = new TaskManager({ laneConcurrency: {
   local: positiveInt(process.env.MEETING_LOCAL_ASR_CONCURRENCY, 1),
-  cloud: positiveInt(process.env.MEETING_CLOUD_ASR_CONCURRENCY, 3)
+  cloud: positiveInt(process.env.MEETING_CLOUD_ASR_CONCURRENCY, 3), runtime: 1
 } });
