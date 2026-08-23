@@ -215,6 +215,11 @@ export default function Models() {
           {models.filter((m) => m.kind === 'qwen').map((m) => (
             <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} benchmark={benchmarks[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onBenchmark={benchmark} onDelete={del} onSwitch={switchModel} />
           ))}
+
+          <h2 className="font-semibold text-lg pt-4">精确时间轴模型</h2>
+          {models.filter((m) => m.role === 'aligner' || m.kind === 'qwen-forced-aligner').map((m) => (
+            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onDelete={del} />
+          ))}
         </div>
       )}
     </div>
@@ -248,6 +253,7 @@ function RuntimeItem({ label, value }) {
 }
 
 function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, onDownload, onCancel, onVerify, onBenchmark, onDelete, onSwitch }) {
+  const isAsr = (m.role || 'asr') === 'asr';
   const isCurrent = current === m.id && m.installed;
   const isDownloading = downloading === m.id;
   const dlStatus = status?.status || m.status;
@@ -299,8 +305,8 @@ function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, on
           <button className="btn-secondary !py-1.5 text-sm" disabled>{state}</button>
         ) : m.installed ? (
           <>
-            {!isCurrent && <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady} onClick={() => onSwitch(m.id)}>切换</button>}
-            <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady || benchmark?.status === 'running'} onClick={() => onBenchmark(m.id)}>性能测试</button>
+            {isAsr && !isCurrent && <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady} onClick={() => onSwitch(m.id)}>切换</button>}
+            {isAsr && <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady || benchmark?.status === 'running'} onClick={() => onBenchmark(m.id)}>性能测试</button>}
             <button className="btn-secondary !py-1.5 text-sm text-red-500" onClick={() => onDelete(m.id)}>删除</button>
           </>
         ) : (

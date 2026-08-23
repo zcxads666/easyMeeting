@@ -3,7 +3,7 @@ import { Link, useParams } from 'react-router-dom';
 import { socket } from '../socket';
 import { api, uploadMeeting } from '../api';
 import { connectSocket } from '../socket';
-import { BASE_URL } from '../env';
+import { BASE_URL, API_TOKEN } from '../env';
 
 export default function Meeting() {
   const { id } = useParams();
@@ -16,7 +16,12 @@ export default function Meeting() {
   const [taskStage, setTaskStage] = useState('');
   const [activeTaskId, setActiveTaskId] = useState(null);
   const [copiedIdx, setCopiedIdx] = useState(-1);
+  const [audioUrl, setAudioUrl] = useState('');
+  const [activeSegment, setActiveSegment] = useState(-1);
+  const [alignmentLanguage, setAlignmentLanguage] = useState('zh');
+  const [postTask, setPostTask] = useState(null);
   const mediaRef = useRef(null);
+  const playerRef = useRef(null);
   const audioCtxRef = useRef(null);
   const workletRef = useRef(null);
   const segmentsRef = useRef([]);
@@ -38,7 +43,14 @@ export default function Meeting() {
     setError('');
     segmentsRef.current = [];
     connectSocket();
-    api(`/meetings/${id}`).then(setMeeting).catch(() => setError('会议不存在或加载失败'));
+    api(`/meetings/${id}`).then(async (value) => {
+      setMeeting(value);
+      setAlignmentLanguage(value.asr?.language || value.alignment?.language || 'zh');
+      if (value.audioRef) {
+        const token = await api(`/meetings/${id}/audio-token`, { method: 'POST' });
+        setAudioUrl(`${BASE_URL}${token.url}`);
+      } else setAudioUrl('');
+    }).catch(() => setError('会议不存在或加载失败'));
 
     const onPartial = ({ text, meetingId }) => {
       if (meetingId && meetingId !== id) return;
@@ -148,6 +160,58 @@ export default function Meeting() {
     }
   };
 
+  const runAlignment = async () => {
+    setError('');
+    try {
+      const { taskId } = await api(`/meetings/${id}/align`, { method: 'POST', body: { source: 'auto', language: alignmentLanguage, device: 'auto' } });
+      setPostTask({ id: taskId, stage: 'queued' });
+      const timer = setInterval(async () => {
+        try {
+          const task = await api(`/tasks/${taskId}`);
+          setPostTask({ id: taskId, stage: task.stage, status: task.status });
+          if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+            clearInterval(timer);
+            if (task.status === 'completed') setMeeting(await api(`/meetings/${id}`));
+            else setError(task.error?.message || '精确对齐失败');
+          }
+        } catch (e) { clearInterval(timer); setError(e.message); }
+      }, 700);
+    } catch (e) { setError(e.message); }
+  };
+
+  const downloadSubtitle = async (kind) => {
+    try {
+      const response = await fetch(`${BASE_URL}/api/meetings/${id}/export/${kind}`, {
+        headers: API_TOKEN ? { 'X-Meeting-Token': API_TOKEN } : {}
+      });
+      if (!response.ok) {
+        const payload = await response.json().catch(() => ({}));
+        throw new Error(payload.error || '字幕导出失败');
+      }
+      const blob = await response.blob(); const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = `meeting-${id}.${kind}`; anchor.click();
+      URL.revokeObjectURL(url);
+    } catch (e) { setError(e.message); }
+  };
+
+  const updateActiveSegment = () => {
+    const time = playerRef.current?.currentTime;
+    const segments = meeting?.timeline?.segments || meeting?.segments || [];
+    if (!Number.isFinite(time) || !segments.length) return;
+    let lo = 0; let hi = segments.length - 1; let found = -1;
+    while (lo <= hi) {
+      const mid = (lo + hi) >> 1; const segment = segments[mid];
+      if (!Number.isFinite(segment.start) || time < segment.start) hi = mid - 1;
+      else { found = mid; lo = mid + 1; }
+    }
+    if (found >= 0 && time <= segments[found].end) setActiveSegment(found); else setActiveSegment(-1);
+  };
+
+  const seekTo = (seconds) => {
+    if (!playerRef.current || !Number.isFinite(seconds)) return;
+    playerRef.current.currentTime = seconds; playerRef.current.play().catch(() => {});
+  };
+
   if (!meeting && error) {
     return (
       <div className="pt-24 text-center text-gray-400">
@@ -174,6 +238,12 @@ export default function Meeting() {
 
       {error && <div className="card p-4 mb-4 text-red-600 bg-red-50 border-red-100">{error}</div>}
 
+      {audioUrl && (
+        <div className="card p-4 mb-4">
+          <audio ref={playerRef} controls src={audioUrl} className="w-full" onTimeUpdate={updateActiveSegment} />
+        </div>
+      )}
+
       <div className="flex flex-wrap items-center gap-3 mb-6">
         <button className={recording ? 'btn bg-red-500 text-white hover:bg-red-600' : 'btn-primary'} onClick={toggleRecording}>
           {recording ? '■ 停止' : '● 开始录音'}
@@ -192,6 +262,23 @@ export default function Meeting() {
         )}
       </div>
 
+      {meeting.rawText && meeting.audioRef && (
+        <div className="card p-4 mb-6 flex flex-wrap gap-3 items-center">
+          <span className="text-sm font-medium">精确时间轴</span>
+          <select className="input py-1 text-sm" value={alignmentLanguage} onChange={(e) => setAlignmentLanguage(e.target.value)}>
+            {[['zh','中文'],['en','English'],['yue','粤语'],['fr','Français'],['de','Deutsch'],['it','Italiano'],['ja','日本語'],['ko','한국어'],['pt','Português'],['ru','Русский'],['es','Español']].map(([value,label]) => <option key={value} value={value}>{label}</option>)}
+          </select>
+          <button className="btn-secondary" onClick={runAlignment} disabled={postTask && !['completed','failed','cancelled'].includes(postTask.status)}>
+            {postTask && !['completed','failed','cancelled'].includes(postTask.status) ? taskStageLabel(postTask.stage) : meeting.alignment?.stale ? '重新对齐' : meeting.alignment ? '重新运行' : '运行精确对齐'}
+          </button>
+          <span className={`text-xs ${meeting.alignment?.stale ? 'text-amber-600' : 'text-gray-400'}`}>
+            {meeting.alignment?.stale ? '已过期' : meeting.timelineStatus === 'aligned' ? '精确' : '未运行'}
+          </span>
+          <button className="btn-secondary ml-auto" onClick={() => downloadSubtitle('srt')} disabled={meeting.alignment?.stale}>导出 SRT</button>
+          <button className="btn-secondary" onClick={() => downloadSubtitle('vtt')} disabled={meeting.alignment?.stale}>导出 VTT</button>
+        </div>
+      )}
+
       {/* 实时字幕 */}
       {recording && (
         <div className="card p-5 mb-6">
@@ -208,19 +295,19 @@ export default function Meeting() {
           <h2 className="font-semibold">转写文本</h2>
           <span className="text-xs text-gray-400">{meeting.segments?.length || 0} 段</span>
         </div>
-        {meeting.segments?.length ? (
+        {(meeting.timeline?.segments || meeting.segments)?.length ? (
           <div className="space-y-3">
-            {meeting.segments.map((s, i) => (
+            {(meeting.timeline?.segments || meeting.segments).map((s, i) => (
               <div
                 key={i}
-                className="flex gap-3 group cursor-pointer rounded-lg px-2 py-1 -mx-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors"
+                className={`flex gap-3 group cursor-pointer rounded-lg px-2 py-1 -mx-2 hover:bg-black/5 dark:hover:bg-white/5 transition-colors ${activeSegment === i ? 'bg-blue-50 dark:bg-blue-900/20' : ''}`}
                 onClick={() => {
-                  navigator.clipboard.writeText(s.text || '');
-                  setCopiedIdx(i);
-                  setTimeout(() => setCopiedIdx(-1), 1500);
+                  if (Number.isFinite(s.start)) seekTo(s.start);
+                  else { navigator.clipboard.writeText(s.text || ''); setCopiedIdx(i); setTimeout(() => setCopiedIdx(-1), 1500); }
                 }}
-                title="点击复制此句"
+                title={Number.isFinite(s.start) ? '点击跳转并播放' : '点击复制此句'}
               >
+                {Number.isFinite(s.start) && <button className="text-xs text-apple-blue shrink-0" onClick={(event) => { event.stopPropagation(); seekTo(s.start); }}>{formatClock(s.start)}</button>}
                 {s.speaker && <span className="text-xs px-2 py-0.5 h-fit rounded-full bg-blue-100 text-blue-600 dark:bg-blue-900/30 dark:text-blue-400 shrink-0">{s.speaker}</span>}
                 <p className="text-gray-700 dark:text-gray-300 leading-relaxed flex-1">{s.text}</p>
                 {copiedIdx === i && <span className="text-xs text-green-500 self-center shrink-0">已复制</span>}
@@ -257,6 +344,11 @@ function uint8ToBase64(uint8) {
 
 function taskStageLabel(stage) {
   return ({ queued: '等待中', preparing: '准备中', probing: '读取音频', transcoding: '转码中',
-    loading_model: '加载模型', transcribing: '转写中', saving: '保存中', completed: '完成',
+    loading_model: '加载模型', transcribing: '转写中', aligning: '对齐中', building_timeline: '构建时间轴', saving: '保存中', completed: '完成',
     failed: '失败', cancelled: '已取消' })[stage] || '处理中';
+}
+
+function formatClock(seconds) {
+  const whole = Math.max(0, Math.floor(seconds));
+  return `${String(Math.floor(whole / 60)).padStart(2, '0')}:${String(whole % 60).padStart(2, '0')}`;
 }

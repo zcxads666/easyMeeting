@@ -19,6 +19,7 @@ import { setupRealtime } from './socket/realtime.js';
 import { spawnPython, getRuntimeHealth } from './services/python.js';
 import { checkFFmpeg } from './services/audio/ffmpeg.js';
 import { createLogger } from './services/logger.js';
+import { issueMediaToken, verifyMediaToken } from './services/audio/media-token.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const logger = createLogger('server');
@@ -67,8 +68,11 @@ export function createServer(options = {}) {
   app.use((req, res, next) => {
     if (!apiToken) return next();
     if (!req.path.startsWith('/api/')) return next();
+    const audioMatch = /^\/api\/meetings\/([0-9a-f-]+)\/audio$/i.exec(req.path);
+    if (audioMatch && verifyMediaToken(apiToken, req.query.mediaToken, audioMatch[1])) return next();
     const got = req.get('x-meeting-token') || req.query.token || '';
     if (got !== apiToken) return res.status(401).json({ error: 'unauthorized' });
+    req.issueMediaToken = (meetingId, ttlMs) => issueMediaToken(apiToken, meetingId, ttlMs);
     next();
   });
 

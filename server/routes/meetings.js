@@ -13,6 +13,9 @@ import { getSettings } from '../services/store/jsonstore.js';
 import { UPLOADS_DIR } from '../config.js';
 import { mimeFor } from '../services/audio/ffmpeg.js';
 import { resolveMeetingAudio } from '../services/audio/access.js';
+import { runAlignment } from '../services/alignment.js';
+import { buildSrt, buildVtt, SubtitleError } from '../services/subtitles.js';
+import { MEETING_SCHEMA_VERSION } from '../services/timeline.js';
 
 const router = Router();
 
@@ -73,12 +76,22 @@ router.get('/:id/audio', async (req, res) => {
   }
 });
 
+router.post('/:id/audio-token', async (req, res) => {
+  const meeting = await getMeeting(req.params.id);
+  if (!meeting) return res.status(404).json({ error: 'meeting not found' });
+  if (!meeting.audioRef) return res.status(404).json({ error: 'audio not found' });
+  if (!req.issueMediaToken) return res.json({ url: `/api/meetings/${meeting.id}/audio`, expiresAt: null });
+  const ttlMs = 5 * 60 * 1000;
+  const mediaToken = req.issueMediaToken(meeting.id, ttlMs);
+  return res.json({ url: `/api/meetings/${meeting.id}/audio?mediaToken=${encodeURIComponent(mediaToken)}`, expiresAt: Date.now() + ttlMs });
+});
+
 // 新建
 router.post('/', async (req, res) => {
   const { title = '未命名会议' } = req.body || {};
   const meeting = {
     id: randomUUID(),
-    schemaVersion: 2,
+    schemaVersion: MEETING_SCHEMA_VERSION,
     segmentTimeUnit: 'seconds',
     title,
     createdAt: Date.now(),
@@ -86,6 +99,12 @@ router.post('/', async (req, res) => {
     duration: 0,
     source: 'realtime',
     segments: [],
+    timeline: { words: [], segments: [], source: 'asr', status: 'provisional', updatedAt: Date.now() },
+    timelineStatus: 'provisional',
+    alignment: null,
+    diarization: null,
+    speakerLabels: {},
+    postProcessing: { autoAlign: false, autoDiarize: false },
     rawText: '',
     corrected: '',
     summary: null,
@@ -110,6 +129,36 @@ router.delete('/:id', async (req, res) => {
   await deleteMeeting(req.params.id);
   res.json({ ok: true });
 });
+
+router.post('/:id/align', async (req, res) => {
+  const meeting = await getMeeting(req.params.id);
+  if (!meeting) return res.status(404).json({ error: '会议不存在', code: 'MEETING_NOT_FOUND' });
+  const task = taskManager.create({ type: 'alignment', lane: 'local', metadata: { meetingId: meeting.id },
+    run: (context) => runAlignment(meeting.id, req.body || {}, context) });
+  return res.status(202).json({ taskId: task.id });
+});
+
+function exportSubtitles(kind) {
+  return async (req, res) => {
+    const meeting = await getMeeting(req.params.id);
+    if (!meeting) return res.status(404).json({ error: '会议不存在', code: 'MEETING_NOT_FOUND' });
+    try {
+      const options = { allowEstimated: req.query.allowEstimated === '1', includeSpeaker: req.query.includeSpeaker === '1' };
+      const result = kind === 'srt' ? buildSrt(meeting, options) : buildVtt(meeting, options);
+      res.setHeader('Content-Type', kind === 'srt' ? 'application/x-subrip; charset=utf-8' : 'text/vtt; charset=utf-8');
+      res.setHeader('Content-Disposition', `attachment; filename="meeting-${meeting.id}.${kind}"`);
+      res.setHeader('X-Timeline-Precision', result.precision);
+      if (result.warning) res.setHeader('X-Timeline-Warning', encodeURIComponent(result.warning));
+      return res.send(result.content);
+    } catch (error) {
+      if (error instanceof SubtitleError) return res.status(409).json({ error: error.message, code: error.code });
+      throw error;
+    }
+  };
+}
+
+router.get('/:id/export/srt', exportSubtitles('srt'));
+router.get('/:id/export/vtt', exportSubtitles('vtt'));
 
 // 上传录音并转写
 function unlinkUpload(file) {
@@ -147,14 +196,17 @@ router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
       if (context.isCancellationRequested()) return null;
       context.update('saving');
       const saved = await updateMeeting(meeting.id, {
-        schemaVersion: 2,
+        schemaVersion: MEETING_SCHEMA_VERSION,
         segmentTimeUnit: 'seconds',
         source: 'file',
         audioRef: req.file.path,
         rawText: result.text,
         segments: result.segments,
+        timeline: { words: [], segments: result.segments, source: 'asr', status: 'provisional', updatedAt: Date.now() },
+        timelineStatus: 'provisional',
+        alignment: null,
         duration: result.duration ?? duration ?? 0,
-        asr: { provider: result.provider, model: result.model, device: result.device,
+        asr: { provider: result.provider, model: result.model, device: result.device, language: result.language,
           latencyMs: result.latencyMs, realtimeFactor: result.realtimeFactor, warnings: result.warnings },
         status: 'transcribed'
       });

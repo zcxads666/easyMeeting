@@ -5,13 +5,16 @@ import { MODELS_DIR } from '../../config.js';
 const GB = 1024 ** 3;
 export const MODEL_CATALOG = [
   ...[['tiny', .08], ['base', .15], ['small', .5], ['medium', 1.5], ['large-v3', 3]].map(([size, gb]) => ({
-    id: `whisper-${size}`, label: `Whisper ${size}`, engine: 'whisper', kind: 'whisper', backend: 'faster-whisper', source: 'huggingface',
+    id: `whisper-${size}`, label: `Whisper ${size}`, role: 'asr', engine: 'whisper', kind: 'whisper', backend: 'faster-whisper', source: 'huggingface',
     estimatedSizeBytes: Math.round(gb * GB), supportedDevices: ['cpu', 'cuda']
   })),
   ...[['Qwen/Qwen3-ASR-0.6B-hf', 1.6], ['Qwen/Qwen3-ASR-1.7B-hf', 3.8]].map(([id, gb]) => ({
-    id, label: id.replace('Qwen/', ''), engine: 'qwen', kind: 'qwen', backend: 'transformers', source: 'huggingface',
+    id, label: id.replace('Qwen/', ''), role: 'asr', engine: 'qwen', kind: 'qwen', backend: 'transformers', source: 'huggingface',
     estimatedSizeBytes: Math.round(gb * GB), supportedDevices: ['cpu', 'cuda', 'mps']
-  }))
+  })),
+  { id: 'Qwen/Qwen3-ForcedAligner-0.6B-hf', label: 'Qwen3-ForcedAligner-0.6B-hf', role: 'aligner',
+    engine: 'qwen-forced-aligner', kind: 'qwen-forced-aligner', backend: 'transformers', source: 'huggingface',
+    estimatedSizeBytes: Math.round(1.8 * GB), supportedDevices: ['cpu', 'cuda', 'mps'] }
 ];
 
 function directoryFor(model) {
@@ -32,7 +35,7 @@ export async function inspectModelsWithoutRuntime() {
     if (!names) return { ...model, status: 'not_installed', installed: false, sizeBytes: 0, error: null };
     const hasConfig = names.includes('config.json');
     const hasWeights = names.some((name) => name === 'model.bin' || name === 'pytorch_model.bin' || name.endsWith('.safetensors') || name.endsWith('.index.json'));
-    const hasProcessor = model.engine !== 'qwen' || names.includes('preprocessor_config.json') || names.includes('processor_config.json');
+    const hasProcessor = model.backend !== 'transformers' || names.includes('preprocessor_config.json') || names.includes('processor_config.json');
     const ready = hasConfig && hasWeights && hasProcessor;
     return { ...model, status: ready ? 'ready' : 'broken', installed: ready, sizeBytes: await size(directory),
       error: ready ? null : { code: 'MODEL_INCOMPLETE', message: '模型文件不完整；Runtime 可用后可执行验证或重新下载' } };

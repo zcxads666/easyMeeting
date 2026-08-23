@@ -8,6 +8,7 @@ import {
 import { SECRET_PATHS, ENV_SECRET_KEYS, getSecretStore, getPath, setPath,
   isMaskedSecret, resolveSecretUpdate, migratePlaintextSecrets } from '../secrets.js';
 import { migrateSettings, validateSettingsPatch } from '../settings-schema.js';
+import { migrateMeeting, markDependentArtifactsStale } from '../timeline.js';
 
 export function ensureDirs() {
   for (const dir of [DATA_DIR, MEETINGS_DIR, UPLOADS_DIR, TRASH_DIR]) {
@@ -79,7 +80,7 @@ export async function listMeetings() {
   const meetings = await Promise.all(
     files.filter((f) => f.endsWith('.json')).map(async (f) => {
       const m = await readJson(path.join(MEETINGS_DIR, f), null);
-      return m && m.id ? m : null;
+      return m && m.id ? migrateMeeting(m) : null;
     })
   );
   return meetings
@@ -92,7 +93,8 @@ export async function listMeetings() {
 
 export async function getMeeting(id) {
   try {
-    return await readJson(meetingFile(id), null);
+    const meeting = await readJson(meetingFile(id), null);
+    return meeting ? migrateMeeting(meeting) : null;
   } catch (e) {
     if (e.code === 'INVALID_MEETING_ID') return null;
     throw e;
@@ -101,6 +103,7 @@ export async function getMeeting(id) {
 
 export async function saveMeeting(meeting) {
   const file = meetingFile(meeting?.id);
+  meeting = migrateMeeting(meeting);
   meeting.updatedAt = Date.now();
   await ensureDirs();
   await writeJson(file, meeting);
@@ -110,8 +113,13 @@ export async function saveMeeting(meeting) {
 export async function updateMeeting(id, fields) {
   const latest = await getMeeting(id);
   if (!latest) return null;
-  Object.assign(latest, fields);
-  return saveMeeting(latest);
+  const transcriptChanged = ('rawText' in fields && fields.rawText !== latest.rawText)
+    || ('corrected' in fields && fields.corrected !== latest.corrected);
+  const audioChanged = 'audioRef' in fields && fields.audioRef !== latest.audioRef;
+  const next = transcriptChanged || audioChanged
+    ? markDependentArtifactsStale(latest, audioChanged ? 'audio_changed' : 'transcript_changed') : latest;
+  Object.assign(next, fields);
+  return saveMeeting(next);
 }
 
 export async function deleteMeeting(id) {

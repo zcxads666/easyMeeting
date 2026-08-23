@@ -58,6 +58,7 @@
       "python/model_manager.py",
       "python/transcribe_whisper.py",
       "python/transcribe_qwen.py",
+      "python/forced_aligner.py",
       "python/runtime.py",
       "python/requirements.txt",
       "README.md",
@@ -69,6 +70,7 @@
       "python/model_manager.py",
       "python/transcribe_whisper.py",
       "python/transcribe_qwen.py",
+      "python/forced_aligner.py",
       "python/runtime.py",
       "python/requirements.txt"
     ],

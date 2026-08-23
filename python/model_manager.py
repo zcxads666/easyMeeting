@@ -16,23 +16,32 @@ MANIFEST_NAME = ".meeting-model.json"
 logger = logging.getLogger("meeting.model")
 WHISPER_SIZES = ["tiny", "base", "small", "medium", "large-v3"]
 QWEN_MODELS = ["Qwen/Qwen3-ASR-0.6B-hf", "Qwen/Qwen3-ASR-1.7B-hf"]
+ALIGNER_MODELS = ["Qwen/Qwen3-ForcedAligner-0.6B-hf"]
 DEFAULT_SOURCE = os.environ.get("MEETING_MODEL_SOURCE", "huggingface")
 REFERENCE_SIZES_GB = {
     "whisper-tiny": .08, "whisper-base": .15, "whisper-small": .5,
     "whisper-medium": 1.5, "whisper-large-v3": 3.0,
     "Qwen/Qwen3-ASR-0.6B-hf": 1.6, "Qwen/Qwen3-ASR-1.7B-hf": 3.8,
+    "Qwen/Qwen3-ForcedAligner-0.6B-hf": 1.8,
 }
 MODEL_CATALOG = [
-    *[{"id": f"whisper-{s}", "label": f"Whisper {s}", "engine": "whisper", "backend": "faster-whisper",
+    *[{"id": f"whisper-{s}", "label": f"Whisper {s}", "role": "asr", "engine": "whisper", "backend": "faster-whisper",
        "source": "modelscope" if DEFAULT_SOURCE == "modelscope" else "huggingface",
        "estimatedSize": int(REFERENCE_SIZES_GB[f"whisper-{s}"] * 1024 ** 3),
        "supportedDevices": ["cpu", "cuda"], "recommendedDevice": "cuda" if s in ("medium", "large-v3") else "auto",
        "computeTypes": {"cpu": ["int8", "float32"], "cuda": ["float16", "int8_float16", "float32"]},
        "supportsTimestamps": True, "supportsStreaming": False} for s in WHISPER_SIZES],
-    *[{"id": mid, "label": mid.removeprefix("Qwen/"), "engine": "qwen", "backend": "transformers",
+    *[{"id": mid, "label": mid.removeprefix("Qwen/"), "role": "asr", "engine": "qwen", "backend": "transformers",
        "source": "huggingface", "estimatedSize": int(REFERENCE_SIZES_GB[mid] * 1024 ** 3),
        "supportedDevices": ["cpu", "cuda", "mps"], "recommendedDevice": "auto",
        "supportsTimestamps": False, "supportsStreaming": False} for mid in QWEN_MODELS],
+    *[{"id": mid, "label": mid.removeprefix("Qwen/"), "role": "aligner", "engine": "qwen-forced-aligner",
+       "backend": "transformers", "source": "huggingface",
+       "estimatedSize": int(REFERENCE_SIZES_GB[mid] * 1024 ** 3),
+       "supportedDevices": ["cpu", "cuda", "mps"], "recommendedDevice": "auto",
+       "supportedLanguages": ["Chinese", "English", "Cantonese", "French", "German", "Italian",
+                              "Japanese", "Korean", "Portuguese", "Russian", "Spanish"],
+       "supportsTimestamps": True, "supportsStreaming": False} for mid in ALIGNER_MODELS],
 ]
 CATALOG_BY_ID = {item["id"]: item for item in MODEL_CATALOG}
 _size_cache = {}
@@ -106,7 +115,7 @@ def verify_structure(model_id, directory):
     if not directory.is_dir(): return False, "model directory missing"
     if not (directory / "config.json").is_file(): return False, "config.json missing"
     if not _weight_exists(directory): return False, "model weights missing"
-    if item["engine"] == "qwen" and not any((directory / name).is_file() for name in
+    if item["backend"] == "transformers" and not any((directory / name).is_file() for name in
                                                ("preprocessor_config.json", "processor_config.json")):
         return False, "processor config missing"
     return True, None

@@ -9,6 +9,7 @@ from typing import Optional
 import model_manager
 import transcribe_whisper
 import transcribe_qwen
+import forced_aligner
 import runtime
 
 app = FastAPI(title="Meeting Local Inference")
@@ -40,6 +41,14 @@ class BenchmarkReq(BaseModel):
     compute_type: Optional[str] = None
     warmup_runs: int = Field(default=1, ge=0, le=3)
     measured_runs: int = Field(default=1, ge=1, le=3)
+
+
+class AlignmentReq(BaseModel):
+    file: str
+    text: str
+    language: str
+    model: str = forced_aligner.DEFAULT_MODEL
+    device: str = "auto"
 
 
 @app.get("/health")
@@ -102,7 +111,7 @@ async def switch_model(req: SwitchReq):
 @app.delete("/models/{model_id:path}")
 async def delete_model(model_id: str):
     try:
-        return model_manager.delete(model_id, lambda: (transcribe_whisper.release(), transcribe_qwen.release()))
+        return model_manager.delete(model_id, lambda: (transcribe_whisper.release(), transcribe_qwen.release(), forced_aligner.release()))
     except model_manager.ModelLifecycleError as e:
         raise HTTPException(status_code=409 if e.code == "MODEL_BUSY" else 400,
                             detail={"code": e.code, "message": str(e), **e.details})
@@ -122,6 +131,22 @@ def benchmark(req: BenchmarkReq):
             return transcribe_qwen.benchmark_pcm(pcm, req.id, req.device, req.warmup_runs, req.measured_runs)
     except model_manager.ModelLifecycleError as e:
         raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **e.details})
+
+
+@app.post("/align")
+def align(req: AlignmentReq):
+    pcm = _read_uploads_file(req.file)
+    try:
+        state = model_manager.verify_model(req.model)
+        if state["status"] != "ready":
+            raise model_manager.ModelLifecycleError("ALIGNER_NOT_INSTALLED", "Forced Aligner 模型尚未就绪", status=state["status"])
+        with model_manager.model_operation(req.model):
+            return forced_aligner.align_pcm(pcm, req.text, req.language, req.model, req.device)
+    except model_manager.ModelLifecycleError as exc:
+        raise HTTPException(status_code=409, detail={"code": exc.code, "message": str(exc), **exc.details})
+    except forced_aligner.AlignmentRuntimeError as exc:
+        status = 409 if exc.code in {"ALIGNER_NOT_INSTALLED", "ALIGNMENT_LANGUAGE_DEPENDENCY_MISSING"} else 400 if exc.code.startswith("ALIGNMENT_") else 500
+        raise HTTPException(status_code=status, detail={"code": exc.code, "message": str(exc), **exc.context})
 
 
 def _read_uploads_file(file_path: str) -> bytes:
