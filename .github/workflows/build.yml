@@ -1,10 +1,10 @@
 name: Build Desktop
 
 on:
-  # 允许在 GitHub Actions 页面手动运行
+  # GitHub Actions 页面手动运行
   workflow_dispatch:
 
-  # 推送版本标签时自动构建
+  # 打版本标签时自动构建
   # 例如：v0.1.0、v0.2.0
   push:
     tags:
@@ -30,7 +30,7 @@ jobs:
     runs-on: ${{ matrix.os }}
 
     steps:
-      # 1. 拉取代码
+      # 1. 拉取仓库代码
       - name: Checkout repository
         uses: actions/checkout@v4
 
@@ -41,7 +41,7 @@ jobs:
           node-version: 22
           cache: npm
 
-      # 3. 安装依赖
+      # 3. 安装 npm 依赖
       - name: Install dependencies
         run: npm ci
 
@@ -49,11 +49,13 @@ jobs:
       - name: Build Web
         run: npm run build
 
-      # 5. Electron 打包
+      # 5. Electron 桌面端打包
+      # --publish never 防止 electron-builder
+      # 在 CI 环境下自动尝试发布 GitHub Release
       - name: Build Desktop
-        run: npm run desktop:dist
+        run: npm run desktop:dist -- --publish never
 
-      # 6. 上传构建结果
+      # 6. 上传打包结果到 GitHub Actions Artifacts
       - name: Upload artifacts
         uses: actions/upload-artifact@v4
         with:
