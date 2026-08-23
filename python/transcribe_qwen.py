@@ -82,4 +82,22 @@ def transcribe_pcm(pcm_bytes, model_id, language=None, device="auto"):
 def transcribe_file_pcm(path, model_id, language=None, device="auto"):
     with open(path, "rb") as file: return transcribe_pcm(file.read(), model_id, language, device)
 
+def benchmark_pcm(pcm_bytes, model_id, device="auto", warmup_runs=1, measured_runs=1):
+    resolved = runtime.resolve_device(device)
+    cold_start = not (_active and _active[0][0] == model_id and _active[0][1] == resolved)
+    load_started = time.perf_counter(); _, key = _load(model_id, resolved)
+    load_ms = (time.perf_counter() - load_started) * 1000 if cold_start else 0
+    for _ in range(max(0, warmup_runs)): transcribe_pcm(pcm_bytes, model_id, None, resolved)
+    runs = []
+    for _ in range(max(1, min(3, measured_runs))):
+        started = time.perf_counter(); transcribe_pcm(pcm_bytes, model_id, None, resolved)
+        runs.append((time.perf_counter() - started) * 1000)
+    runs.sort(); inference_ms = runs[len(runs) // 2]; duration = len(pcm_bytes) / 2 / 16000
+    return {"model": model_id, "engine": "qwen", "backend": "transformers", "device": key[1],
+            "dtype": key[2], "computeType": None, "audioDurationSeconds": duration,
+            "modelLoadMs": load_ms, "inferenceMs": inference_ms, "totalMs": load_ms + inference_ms,
+            "rtf": inference_ms / 1000 / duration if duration else None,
+            "realtimeFactor": duration / (inference_ms / 1000) if inference_ms > 0 else None,
+            "coldStart": cold_start, "warmupRuns": max(0, warmup_runs), "measuredRuns": len(runs)}
+
 def release(): _release_active()

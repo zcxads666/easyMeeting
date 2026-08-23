@@ -18,8 +18,10 @@ import { createDiagnosticsRoute } from './routes/diagnostics.js';
 import { setupRealtime } from './socket/realtime.js';
 import { spawnPython, getRuntimeHealth } from './services/python.js';
 import { checkFFmpeg } from './services/audio/ffmpeg.js';
+import { createLogger } from './services/logger.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const logger = createLogger('server');
 
 function resolveApiToken(options) {
   if (process.env.MEETING_DISABLE_AUTH === '1') return '';
@@ -119,6 +121,7 @@ export function createServer(options = {}) {
   const onTaskUpdated = (task) => {
     io.emit('task:progress', { taskId: task.id, ...task });
     if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+      logger.info('task finished', { taskId: task.id, type: task.type, status: task.status, errorCode: task.error?.code });
       io.emit('task:done', { taskId: task.id, ok: task.status === 'completed', status: task.status,
         meetingId: task.result?.meetingId, error: task.error?.message, result: task.result });
     }

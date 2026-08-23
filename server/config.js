@@ -13,6 +13,7 @@ export const MEETINGS_DIR = path.join(DATA_DIR, 'meetings');
 export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
 export const TRASH_DIR = path.join(DATA_DIR, 'trash');
 export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
+export const LOGS_DIR = process.env.MEETING_LOG_DIR ? path.resolve(process.env.MEETING_LOG_DIR) : path.join(DATA_DIR, 'logs');
 
 export const MODELS_DIR = process.env.MEETING_MODELS_DIR
   ? path.resolve(process.env.MEETING_MODELS_DIR)

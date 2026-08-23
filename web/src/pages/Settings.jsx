@@ -64,6 +64,14 @@ export default function Settings() {
     try { await navigator.clipboard.writeText(JSON.stringify(diagnostics, null, 2)); setDiagnosticMsg('✓ 已复制'); }
     catch (e) { setDiagnosticMsg('复制失败：' + e.message); }
   };
+  const exportDiagnostics = async () => {
+    try {
+      const bundle = await api('/diagnostics/export');
+      const url = URL.createObjectURL(new Blob([JSON.stringify(bundle, null, 2)], { type: 'application/json' }));
+      const anchor = document.createElement('a'); anchor.href = url; anchor.download = `easyMeeting-diagnostics-${Date.now()}.json`; anchor.click();
+      URL.revokeObjectURL(url); setDiagnosticMsg('✓ 已导出');
+    } catch (e) { setDiagnosticMsg('导出失败：' + e.message); }
+  };
 
   return (
     <div className="pt-12 max-w-2xl mx-auto">
@@ -162,7 +170,8 @@ export default function Settings() {
         <div className="flex items-center justify-between gap-3">
           <div><h2 className="font-semibold">诊断</h2><p className="text-sm text-gray-400">仅包含脱敏后的应用、运行环境和设备状态</p></div>
           <div className="flex gap-2"><button className="btn-secondary" onClick={refreshDiagnostics}>刷新</button>
-            <button className="btn-secondary" disabled={!diagnostics} onClick={copyDiagnostics}>复制诊断信息</button></div>
+            <button className="btn-secondary" disabled={!diagnostics} onClick={copyDiagnostics}>复制诊断信息</button>
+            <button className="btn-secondary" onClick={exportDiagnostics}>导出诊断包</button></div>
         </div>
         {diagnosticMsg && <p className="text-sm mt-3 text-gray-500">{diagnosticMsg}</p>}
         {diagnostics && <pre className="mt-4 p-3 rounded-lg bg-gray-100 dark:bg-black/20 text-xs overflow-auto max-h-72">{JSON.stringify(diagnostics, null, 2)}</pre>}

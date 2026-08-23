@@ -12,7 +12,7 @@ import { taskManager } from '../services/queue.js';
 import { getSettings } from '../services/store/jsonstore.js';
 import { UPLOADS_DIR } from '../config.js';
 import { mimeFor } from '../services/audio/ffmpeg.js';
-import fsp from 'node:fs/promises';
+import { resolveMeetingAudio } from '../services/audio/access.js';
 
 const router = Router();
 
@@ -48,11 +48,7 @@ router.get('/:id/audio', async (req, res) => {
   if (!meeting) return res.status(404).json({ error: 'meeting not found' });
   if (!meeting.audioRef) return res.status(404).json({ error: 'audio not found' });
   try {
-    const [root, audio] = await Promise.all([fsp.realpath(UPLOADS_DIR), fsp.realpath(path.resolve(meeting.audioRef))]);
-    const relative = path.relative(root, audio);
-    if (!relative || relative.startsWith('..') || path.isAbsolute(relative)) return res.status(403).json({ error: 'invalid audio path' });
-    const stat = await fsp.stat(audio);
-    if (!stat.isFile()) return res.status(404).json({ error: 'audio not found' });
+    const { path: audio, stat } = await resolveMeetingAudio(meeting);
     const range = req.get('range');
     res.setHeader('Accept-Ranges', 'bytes'); res.setHeader('Content-Type', mimeFor(audio));
     if (!range) {
@@ -71,7 +67,7 @@ router.get('/:id/audio', async (req, res) => {
     res.status(206); res.setHeader('Content-Range', `bytes ${start}-${end}/${stat.size}`);
     res.setHeader('Content-Length', end - start + 1); return fs.createReadStream(audio, { start, end }).pipe(res);
   } catch (error) {
-    if (error.code === 'ENOENT') return res.status(404).json({ error: 'audio not found' });
+    if (error.status) return res.status(error.status).json({ error: error.message, code: error.code });
     console.error('[security] audio access failed:', error.message);
     return res.status(500).json({ error: 'audio access failed' });
   }

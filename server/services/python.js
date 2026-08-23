@@ -6,8 +6,10 @@ import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
 import { ROOT, PYTHON_PORT, DATA_DIR } from '../config.js';
+import { createLogger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
+const logger = createLogger('python');
 
 let child = null;
 let restartTimer = null;
@@ -154,6 +156,7 @@ async function launch() {
   try {
     pythonBin = await ensureVenv({ allowInstall: AUTO_INSTALL });
   } catch (e) {
+    logger.warn('runtime preparation failed', { errorCode: e.code, message: e.message });
     console.error('[python] 环境准备失败:', e.message);
     console.error('[python] 请手动运行: npm run setup:python');
     return;
@@ -169,6 +172,7 @@ async function launch() {
   child.stdout.on('data', (d) => process.stdout.write(`[python] ${d}`));
   child.stderr.on('data', (d) => process.stderr.write(`[python:err] ${d}`));
   child.on('exit', async (code, signal) => {
+    logger.warn('daemon exited', { exitCode: code, signal });
     console.log(`[python] exited with code ${code}`);
     child = null;
     const wasIntentional = intentionalKill;

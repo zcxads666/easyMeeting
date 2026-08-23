@@ -1,11 +1,9 @@
 import json
 import base64
-import threading
-import time
 import os
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from typing import Optional
 
 import model_manager
@@ -35,10 +33,13 @@ class DownloadReq(BaseModel):
 class SwitchReq(BaseModel):
     id: str
 
-
-# 后台下载状态追踪
-_download_status = {}  # id -> {status, progress, error, started}
-_download_lock = threading.Lock()
+class BenchmarkReq(BaseModel):
+    id: str
+    file: str
+    device: str = "auto"
+    compute_type: Optional[str] = None
+    warmup_runs: int = Field(default=1, ge=0, le=3)
+    measured_runs: int = Field(default=1, ge=1, le=3)
 
 
 @app.get("/health")
@@ -59,36 +60,34 @@ def list_models():
 
 @app.get("/models/download/status")
 def download_status():
-    with _download_lock:
-        return {"downloads": dict(_download_status)}
-
-
-def _do_download(model_id: str):
-    try:
-        model_manager.download(model_id)
-        with _download_lock:
-            _download_status[model_id] = {"status": "completed", "progress": 100}
-    except Exception as e:
-        with _download_lock:
-            _download_status[model_id] = {"status": "failed", "error": str(e)}
+    return {"downloads": model_manager.download_manager.all_status()}
 
 
 @app.post("/models/download")
 async def download(req: DownloadReq):
-    if req.id not in model_manager.known_ids():
-        with _download_lock:
-            _download_status[req.id] = {"status": "failed", "error": f"未知模型: {req.id}"}
-        raise HTTPException(status_code=400, detail=f"未知模型: {req.id}")
-    with _download_lock:
-        existing = _download_status.get(req.id)
-        if existing and existing.get("status") == "downloading":
-            return {"ok": True, "id": req.id, "status": "already_downloading"}
-        if existing and existing.get("status") == "completed":
-            return {"ok": True, "id": req.id, "status": "completed"}
-        _download_status[req.id] = {"status": "downloading", "progress": 0, "started": time.time()}
-    t = threading.Thread(target=_do_download, args=(req.id,), daemon=True)
-    t.start()
-    return {"ok": True, "id": req.id, "status": "downloading"}
+    try: return {"ok": True, "id": req.id, **model_manager.download_manager.start(req.id)}
+    except model_manager.ModelLifecycleError as e:
+        raise HTTPException(status_code=400, detail={"code": e.code, "message": str(e), **e.details})
+
+
+@app.post("/models/download/cancel")
+async def cancel_download(req: DownloadReq):
+    accepted = model_manager.download_manager.cancel(req.id)
+    return {"ok": accepted, "id": req.id, "status": model_manager.download_manager.status(req.id)}
+
+
+@app.post("/models/verify")
+async def verify_download(req: DownloadReq):
+    try:
+        if req.id not in model_manager.known_ids(): raise model_manager.ModelLifecycleError("MODEL_UNKNOWN", f"未知模型: {req.id}")
+        model_manager.download_manager._set(req.id, status="checking", error=None)
+        with model_manager.model_operation(req.id):
+            result = model_manager.verify_model(req.id)
+            model_manager.download_manager._set(req.id, status=result["status"], error=result.get("error"))
+            return result
+    except model_manager.ModelLifecycleError as e:
+        model_manager.download_manager._set(req.id, status="error", error={"code": e.code, "message": str(e)})
+        raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e)})
 
 
 @app.post("/models/switch")
@@ -103,9 +102,26 @@ async def switch_model(req: SwitchReq):
 @app.delete("/models/{model_id:path}")
 async def delete_model(model_id: str):
     try:
-        return model_manager.delete(model_id)
-    except Exception as e:
-        raise HTTPException(status_code=400, detail=str(e))
+        return model_manager.delete(model_id, lambda: (transcribe_whisper.release(), transcribe_qwen.release()))
+    except model_manager.ModelLifecycleError as e:
+        raise HTTPException(status_code=409 if e.code == "MODEL_BUSY" else 400,
+                            detail={"code": e.code, "message": str(e), **e.details})
+    except Exception as e: raise HTTPException(status_code=400, detail=str(e))
+
+
+@app.post("/models/benchmark")
+def benchmark(req: BenchmarkReq):
+    pcm = _read_uploads_file(req.file)
+    try:
+        state = model_manager.verify_model(req.id)
+        if state["status"] != "ready": raise model_manager.ModelLifecycleError("MODEL_NOT_READY", "模型尚未就绪", status=state["status"])
+        with model_manager.model_operation(req.id):
+            if req.id.startswith("whisper-"):
+                return transcribe_whisper.benchmark_pcm(pcm, req.id.removeprefix("whisper-"), req.device,
+                    req.compute_type, req.warmup_runs, req.measured_runs)
+            return transcribe_qwen.benchmark_pcm(pcm, req.id, req.device, req.warmup_runs, req.measured_runs)
+    except model_manager.ModelLifecycleError as e:
+        raise HTTPException(status_code=409, detail={"code": e.code, "message": str(e), **e.details})
 
 
 def _read_uploads_file(file_path: str) -> bytes:
@@ -133,12 +149,11 @@ def transcribe(req: TranscribeReq):
         raise HTTPException(status_code=400, detail="需提供 file 或 pcm")
 
     try:
-        if req.engine == "qwen":
-            return transcribe_qwen.transcribe_pcm(pcm, req.model, req.language, req.device)
-        elif req.engine == "whisper":
-            size = req.model.replace("whisper-", "")
-            return transcribe_whisper.transcribe_pcm(pcm, size, req.language, req.device, req.compute_type)
-        else:
+        with model_manager.model_operation(req.model):
+            if req.engine == "qwen": return transcribe_qwen.transcribe_pcm(pcm, req.model, req.language, req.device)
+            if req.engine == "whisper":
+                size = req.model.replace("whisper-", "")
+                return transcribe_whisper.transcribe_pcm(pcm, size, req.language, req.device, req.compute_type)
             raise ValueError(f"未知本地 ASR engine: {req.engine}")
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail={"message": str(e), "type": type(e).__name__})

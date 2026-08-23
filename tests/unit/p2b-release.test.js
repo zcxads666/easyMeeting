@@ -1,0 +1,35 @@
+import { test } from 'node:test';
+import assert from 'node:assert/strict';
+import fsp from 'node:fs/promises';
+import path from 'node:path';
+import os from 'node:os';
+import { createPackage } from '@electron/asar';
+import { verifyPackage } from '../../scripts/verify-package.mjs';
+
+test('Models UI 覆盖 lifecycle、真实 progress 和 benchmark 状态', async () => {
+  const source = await fsp.readFile('web/src/pages/Models.jsx', 'utf8');
+  for (const state of ['not_installed', 'checking', 'queued', 'downloading', 'verifying', 'ready', 'cancelled', 'broken', 'deleting', 'error']) assert.match(source, new RegExp(state));
+  assert.match(source, /downloadedBytes/); assert.match(source, /speedBytesPerSecond/);
+  assert.match(source, /modelLoadMs/); assert.match(source, /realtimeFactor/); assert.match(source, /性能测试/);
+  assert.doesNotMatch(source, /width:\s*dlStatus[^\n]*40%/, '不得保留伪造 40% 下载进度');
+});
+
+test('Python test runner 明确选择项目 venv 的跨平台路径', async () => {
+  const [runner, pkg] = await Promise.all([fsp.readFile('scripts/python-test.mjs', 'utf8'), fsp.readFile('package.json', 'utf8')]);
+  assert.match(runner, /Scripts.*python\.exe/s); assert.match(runner, /bin.*python/s);
+  assert.match(pkg, /node scripts\/python-test\.mjs/);
+});
+
+test('package verifier 接受完整 asar 并拒绝用户 settings', async () => {
+  const temp = await fsp.mkdtemp(path.join(os.tmpdir(), 'meeting-asar-')); const source = path.join(temp, 'source');
+  const required = ['electron/main.js', 'electron/preload.cjs', 'server/index.js', 'web/dist/index.html',
+    'python/main.py', 'python/model_manager.py', 'python/requirements.txt', 'package.json'];
+  for (const file of required) { const target = path.join(source, file); await fsp.mkdir(path.dirname(target), { recursive: true }); await fsp.writeFile(target, '{}'); }
+  const out = path.join(temp, 'artifact'); await fsp.mkdir(out); await createPackage(source, path.join(out, 'app.asar'));
+  const good = await verifyPackage(out); assert.equal(good.length, 1);
+  await fsp.mkdir(path.join(source, 'data'), { recursive: true }); await fsp.writeFile(path.join(source, 'data/settings.json'), '{}');
+  await fsp.rm(path.join(out, 'app.asar'));
+  await createPackage(source, path.join(out, 'app.asar'));
+  await assert.rejects(verifyPackage(out), /forbidden path/);
+  await fsp.rm(temp, { recursive: true, force: true });
+});

@@ -55,4 +55,24 @@ def transcribe_pcm(pcm_bytes, size="small", language=None, device="auto", comput
 def transcribe_file_pcm(path, size="small", language=None, device="auto", compute_type=None):
     with open(path, "rb") as file: return transcribe_pcm(file.read(), size, language, device, compute_type)
 
+def benchmark_pcm(pcm_bytes, size="small", device="auto", compute_type=None, warmup_runs=1, measured_runs=1):
+    samples_duration = len(pcm_bytes) / 2 / 16000
+    resolved_device, resolved_compute = resolve_whisper_runtime(device, compute_type)
+    key = (size, resolved_device, resolved_compute, "faster-whisper")
+    cold_start = key not in _cache
+    load_started = time.perf_counter(); _get_model(size, resolved_device, resolved_compute)
+    load_ms = (time.perf_counter() - load_started) * 1000 if cold_start else 0
+    for _ in range(max(0, warmup_runs)): transcribe_pcm(pcm_bytes, size, None, resolved_device, resolved_compute)
+    runs = []
+    for _ in range(max(1, min(3, measured_runs))):
+        started = time.perf_counter(); transcribe_pcm(pcm_bytes, size, None, resolved_device, resolved_compute)
+        runs.append((time.perf_counter() - started) * 1000)
+    runs.sort(); inference_ms = runs[len(runs) // 2]
+    return {"model": f"whisper-{size}", "engine": "whisper", "backend": "faster-whisper",
+            "device": resolved_device, "dtype": None, "computeType": resolved_compute,
+            "audioDurationSeconds": samples_duration, "modelLoadMs": load_ms, "inferenceMs": inference_ms,
+            "totalMs": load_ms + inference_ms, "rtf": inference_ms / 1000 / samples_duration if samples_duration else None,
+            "realtimeFactor": samples_duration / (inference_ms / 1000) if inference_ms > 0 else None,
+            "coldStart": cold_start, "warmupRuns": max(0, warmup_runs), "measuredRuns": len(runs)}
+
 def release(): _cache.clear()

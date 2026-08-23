@@ -1,6 +1,8 @@
 {
   "name": "meeting-notes",
   "version": "0.1.0",
+  "description": "Local-first desktop meeting transcription and AI minutes application",
+  "author": "zcxads666",
   "private": true,
   "type": "module",
   "scripts": {
@@ -10,9 +12,10 @@
     "build": "vite build --config web/vite.config.js",
     "start": "node server/index.js",
     "postinstall": "echo '[meeting] run: npm run setup:python to install Python deps'",
-    "setup:python": "python3 -m venv python/.venv && python/.venv/bin/pip install --upgrade pip && python/.venv/bin/pip install -r python/requirements.txt",
+    "setup:python": "node scripts/python-setup.mjs",
     "test": "node --test \"tests/unit/*.test.js\" \"tests/system/*.test.js\"",
-    "test:python": "python3 -m unittest discover -s python/tests -p 'test_*.py'",
+    "test:python": "node scripts/python-test.mjs",
+    "verify:package": "node scripts/verify-package.mjs",
     "dist": "node scripts/build-release.mjs",
     "desktop": "electron .",
     "desktop:dev": "concurrently -k -n web,electron \"npm:dev:web\" \"electron . --dev\"",
@@ -57,6 +60,8 @@
       "python/transcribe_qwen.py",
       "python/runtime.py",
       "python/requirements.txt",
+      "README.md",
+      "docs/**/*",
       "package.json"
     ],
     "asarUnpack": [

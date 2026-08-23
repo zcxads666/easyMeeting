@@ -45,7 +45,7 @@ async def run():
         del_code = 200
     except HTTPException as exc:
         del_code, del_body = exc.status_code, {"detail": exc.detail}
-    main._download_status["whisper-tiny"] = {"status": "completed", "progress": 100}
+    main.model_manager.download_manager.records["whisper-tiny"] = {"status": "downloading", "progress": None}
     again_body = await main.download(main.DownloadReq(id="whisper-tiny"))
     print(json.dumps({"download_status": dl_code, "download_body": dl_body,
       "status_map": st_body.get("downloads", {}), "delete_status": del_code,
@@ -71,10 +71,9 @@ asyncio.run(run())
   assert.equal(result.download_status, 400);
   assert.match(JSON.stringify(result.download_body), /未知模型/);
   const unk = result.status_map['not-a-real-model'];
-  assert.equal(unk?.status, 'failed');
-  assert.notEqual(unk?.status, 'downloading');
+  assert.equal(unk, undefined, '未知模型不应污染受支持模型状态');
   assert.notEqual(result.delete_status, 404, `斜杠 id delete 应能匹配路由, got ${result.delete_status} ${JSON.stringify(result.delete_body)}`);
-  assert.equal(result.completed_again?.status, 'completed');
+  assert.equal(result.completed_again?.alreadyDownloading, true);
   await rmTestDirs(modelsDir);
 });
 

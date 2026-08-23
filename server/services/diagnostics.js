@@ -6,12 +6,13 @@ import { getRuntimeHealth, getRuntimeCapabilities } from './python.js';
 import { runtimeManager } from './runtime-manager.js';
 import { checkFFmpeg } from './audio/ffmpeg.js';
 import { secretStorageBackend } from './secrets.js';
+import { inspectModelsWithoutRuntime } from './models/catalog.js';
 
 const available = async (directory) => { try { await fsp.access(directory); return true; } catch { return false; } };
 export async function diagnosticsSnapshot({ appVersion = 'unknown', authEnabled = true } = {}) {
   const settings = await getSettings();
-  const [runtimeState, runtimeHealth, capabilities, ffmpeg, dataAvailable, modelsAvailable] = await Promise.all([
-    runtimeManager.inspect(), getRuntimeHealth(), getRuntimeCapabilities(), checkFFmpeg(), available(DATA_DIR), available(MODELS_DIR)
+  const [runtimeState, runtimeHealth, capabilities, ffmpeg, dataAvailable, modelsAvailable, models] = await Promise.all([
+    runtimeManager.inspect(), getRuntimeHealth(), getRuntimeCapabilities(), checkFFmpeg(), available(DATA_DIR), available(MODELS_DIR), inspectModelsWithoutRuntime()
   ]);
   const runtime = { status: runtimeState.status, python: capabilities?.python || runtimeState.python || null,
     torch: capabilities?.torch || null, transformers: capabilities?.transformers || runtimeHealth.modelRuntime?.version || null,
@@ -25,6 +26,7 @@ export async function diagnosticsSnapshot({ appVersion = 'unknown', authEnabled 
       devices: capabilities?.devices || null },
     asr: { provider: settings.asr.provider, engine: settings.asr.local.engine,
       model: settings.asr.local.model, device: settings.asr.local.device },
+    models: models.map(({ id, engine, backend, status, sizeBytes }) => ({ id, engine, backend, status, sizeBytes })),
     storage: { dataDirectoryAvailable: dataAvailable, modelsDirectoryAvailable: modelsAvailable },
     security: { secretStorage: secretStorageBackend(), apiAuthEnabled: authEnabled }
   };

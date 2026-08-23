@@ -12,13 +12,16 @@ let mainWindow = null;
 let serverPort = null;
 let apiToken = '';
 let stopPython = null;
+let electronLogger = null;
 
 // 全局错误兜底：防止主进程未捕获异常导致静默崩溃
 process.on('uncaughtException', (err) => {
   console.error('[electron] uncaughtException:', err.message, err.stack?.split('\n')[1] || '');
+  electronLogger?.error('uncaught exception', { errorCode: err.code, message: err.message });
 });
 process.on('unhandledRejection', (reason) => {
   console.error('[electron] unhandledRejection:', reason?.message || reason);
+  electronLogger?.error('unhandled rejection', { errorCode: reason?.code, message: reason?.message || String(reason) });
 });
 
 // ---------- 单实例锁（本地工具防多开） ----------
@@ -44,6 +47,7 @@ async function bootstrap() {
     // Python venv 放到 userData（unpacked 目录在 Windows Program Files 下不可写）
     process.env.MEETING_VENV_DIR ||= path.join(app.getPath('userData'), 'runtime', 'python');
     process.env.MEETING_DATA_DIR ||= path.join(app.getPath('userData'), 'data');
+    process.env.MEETING_LOG_DIR ||= path.join(app.getPath('userData'), 'logs');
     process.env.MEETING_RUNTIME_AUTO_INSTALL = '0';
   }
 
@@ -51,6 +55,8 @@ async function bootstrap() {
   const { createServer } = await import('../server/index.js');
   const python = await import('../server/services/python.js');
   const { EncryptedFileSecretStore, configureSecretStore } = await import('../server/services/secrets.js');
+  const { createLogger } = await import('../server/services/logger.js');
+  electronLogger = createLogger('electron');
   configureSecretStore(new EncryptedFileSecretStore({
     file: path.join(app.getPath('userData'), 'secrets.json'),
     encrypt: (value) => safeStorage.encryptString(value),
@@ -64,6 +70,7 @@ async function bootstrap() {
   serverPort = await srv.start();
   apiToken = srv.apiToken;
   console.log(`[electron] meeting server on 127.0.0.1:${serverPort}`);
+  electronLogger.info('desktop core started', { port: serverPort, packaged: !isDev });
 
   // 生产模式只启动已经安装且验证通过的 Runtime，不执行 pip install。
   python.spawnPython().catch(() => {});

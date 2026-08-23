@@ -33,11 +33,14 @@ await mkdir(PKG_DIR, { recursive: true });
 await cp(path.join(ROOT, 'server'), path.join(PKG_DIR, 'server'), { recursive: true });
 // 前端构建产物
 await cp(path.join(ROOT, 'web', 'dist'), path.join(PKG_DIR, 'web', 'dist'), { recursive: true });
+await cp(path.join(ROOT, 'docs'), path.join(PKG_DIR, 'docs'), { recursive: true });
 // Python 推理服务源码（不含 venv，首次启动自动安装）
 await mkdir(path.join(PKG_DIR, 'python'), { recursive: true });
 for (const f of ['main.py', 'model_manager.py', 'runtime.py', 'transcribe_whisper.py', 'transcribe_qwen.py', 'requirements.txt']) {
   await copyFile(path.join(ROOT, 'python', f), path.join(PKG_DIR, 'python', f));
 }
+await mkdir(path.join(PKG_DIR, 'scripts'), { recursive: true });
+await copyFile(path.join(ROOT, 'scripts', 'python-setup.mjs'), path.join(PKG_DIR, 'scripts', 'python-setup.mjs'));
 // 测试目录（便于用户验证）
 await cp(path.join(ROOT, 'tests'), path.join(PKG_DIR, 'tests'), { recursive: true });
 
@@ -51,7 +54,7 @@ const prodPkg = {
   description: '本地 Web 端会议记录总结工具（纯本地运行，支持实时/文件转写、LLM 纪要、本地模型）',
   scripts: {
     start: 'node server/index.js',
-    'setup:python': 'python3 -m venv python/.venv && python/.venv/bin/pip install --upgrade pip && python/.venv/bin/pip install -r python/requirements.txt',
+    'setup:python': 'node scripts/python-setup.mjs',
     test: pkg.scripts.test
   },
   dependencies: pkg.dependencies,
@@ -97,46 +100,7 @@ pause
 `;
 await writeFile(path.join(PKG_DIR, 'start.bat'), bat);
 
-// 占位 config 说明（data 目录会自动创建）
-await writeFile(
-  path.join(PKG_DIR, 'README.md'),
-  `# 会议纪要工具 v${version}
-
-纯本地运行的 Web 会议记录工具：实时语音转写、录音转写、LLM 智能纪要、本地模型。
-
-## 快速开始
-
-### macOS / Linux
-\`\`\`bash
-./start.sh          # 一键启动（自动安装依赖）
-# 或手动：npm install && npm start
-\`\`\`
-
-### Windows
-双击 \`start.bat\`，或命令行：
-\`\`\`
-npm install
-npm start
-\`\`\`
-
-首次启动会自动：
-1. 创建 \`python/.venv\` 虚拟环境
-2. 安装 Python 推理依赖（fastapi / faster-whisper / transformers / torch 等，约 2-5 分钟）
-3. 拉起本地推理服务（端口 8300）
-
-启动后浏览器访问 **http://localhost:3000**。
-
-## 使用提示
-- 云端转写/LLM：在「设置」页填入对应 Key（千问/火山/MiMo/任意 OpenAI 兼容 LLM）
-- 本地转写：在「模型」页一键下载 whisper / Qwen3-ASR 模型（默认 ModelScope 源，国内快）
-- 所有数据保存在本地 \`data/\` 目录，无数据库，重启不丢失
-
-## 常见问题
-- **Python 环境安装失败**：请先安装 Python 3.9+（https://www.python.org/downloads/），然后运行 \`npm run setup:python\`
-- **本地模型不可用**：确认「模型」页已下载并切换模型；Qwen3-ASR 需要 torch（安装脚本已包含）
-- **端口被占用**：设置环境变量 \`PORT\` 更换端口，如 \`PORT=8080 npm start\`
-`
-);
+await copyFile(path.join(ROOT, 'README.md'), path.join(PKG_DIR, 'README.md'));
 
 // ---------- 5. 压缩 ----------
 console.log('[release] 压缩发布包 …');

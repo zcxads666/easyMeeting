@@ -11,6 +11,9 @@ export default function Models() {
   const [error, setError] = useState('');
   const [runtime, setRuntime] = useState(null);
   const [runtimeTask, setRuntimeTask] = useState(null);
+  const [benchmarkMeeting, setBenchmarkMeeting] = useState('');
+  const [meetings, setMeetings] = useState([]);
+  const [benchmarks, setBenchmarks] = useState({});
   const settings = useStore((s) => s.settings);
   const pollRef = useRef(null);
   const retryTimerRef = useRef(null);
@@ -20,12 +23,8 @@ export default function Models() {
   const load = useCallback(async (retries = 3, silent = false) => {
     if (!silent) setLoading(true);
     try {
-      const runtimeState = await api('/runtime');
+      const [runtimeState, data] = await Promise.all([api('/runtime'), api('/models')]);
       setRuntime(runtimeState);
-      if (!['ready', 'running'].includes(runtimeState.status)) {
-        setModels([]); setDiskUsage(0); setError(''); return;
-      }
-      const data = await api('/models');
       setModels(data.models || []);
       setDiskUsage(data.disk_usage || 0);
       setError('');
@@ -61,21 +60,21 @@ export default function Models() {
 
   // 有下载任务时轮询：只刷状态，下载完成后再刷新列表（避免下载期间频繁计算占用）
   useEffect(() => {
-    if (downloading) {
+    if (downloading || models.some((m) => ['queued', 'downloading', 'verifying'].includes(m.status))) {
       pollStatus();
       pollRef.current = setInterval(() => { pollStatus(); }, 2000);
       return () => clearInterval(pollRef.current);
     }
-  }, [downloading]);
+  }, [downloading, models]);
 
   // 检测下载完成
   useEffect(() => {
     if (!downloading) return;
     const st = status[downloading];
-    if (st && (st.status === 'completed' || st.status === 'failed')) {
+    if (st && ['ready', 'cancelled', 'error', 'broken'].includes(st.status)) {
       setDownloading(null);
       load(3, true);
-      if (st.status === 'failed') setError(`下载失败: ${st.error || ''}`);
+      if (['error', 'broken'].includes(st.status)) setError(`下载失败: ${st.error?.message || st.error || ''}`);
     }
   }, [status, downloading, load]);
 
@@ -84,10 +83,20 @@ export default function Models() {
     setError('');
     try {
       await api('/models/download', { method: 'POST', body: { id } });
+      await load(0, true);
     } catch (e) {
       setError(e.message);
       setDownloading(null);
     }
+  };
+
+  const cancelDownload = async (id) => {
+    try { await api('/models/download/cancel', { method: 'POST', body: { id } }); await load(0, true); }
+    catch (e) { setError(e.message); }
+  };
+  const verify = async (id) => {
+    try { await api('/models/verify', { method: 'POST', body: { id } }); await load(0, true); }
+    catch (e) { setError(e.message); }
   };
 
   const del = async (id) => {
@@ -130,6 +139,28 @@ export default function Models() {
     return () => clearInterval(timer);
   }, [runtimeTask, load]);
 
+  useEffect(() => { api('/meetings').then((items) => {
+    const usable = (items || []).filter((meeting) => meeting.audioRef);
+    setMeetings(usable); if (usable[0]) setBenchmarkMeeting(usable[0].id);
+  }).catch(() => {}); }, []);
+
+  const benchmark = async (id) => {
+    if (!benchmarkMeeting) { setError('请先选择一个包含音频的会议'); return; }
+    try {
+      const { taskId } = await api(`/models/${encodeURIComponent(id)}/benchmark`, { method: 'POST', body: { meetingId: benchmarkMeeting } });
+      setBenchmarks((value) => ({ ...value, [id]: { taskId, status: 'queued', stage: 'queued' } }));
+    } catch (e) { setError(e.message); }
+  };
+  useEffect(() => {
+    const active = Object.entries(benchmarks).filter(([, value]) => value.taskId && !['completed', 'failed', 'cancelled'].includes(value.status));
+    if (!active.length) return;
+    const timer = setInterval(() => active.forEach(async ([id, value]) => {
+      try { const task = await api(`/tasks/${value.taskId}`); setBenchmarks((all) => ({ ...all, [id]: task })); }
+      catch (e) { setError(e.message); }
+    }), 1000);
+    return () => clearInterval(timer);
+  }, [benchmarks]);
+
   const current = settings?.asr?.local?.model;
 
   return (
@@ -157,6 +188,14 @@ export default function Models() {
 
       {runtime && <RuntimePanel runtime={runtime} busy={Boolean(runtimeTask)} onAction={runtimeAction} />}
 
+      <div className="card p-4 mb-6 flex items-center gap-3">
+        <label className="text-sm text-gray-500">性能测试音频</label>
+        <select className="input flex-1" value={benchmarkMeeting} onChange={(e) => setBenchmarkMeeting(e.target.value)}>
+          <option value="">请选择包含音频的会议</option>
+          {meetings.map((meeting) => <option key={meeting.id} value={meeting.id}>{meeting.title}</option>)}
+        </select>
+      </div>
+
       {loading ? (
         <p className="text-center text-gray-400 py-16">加载模型列表…</p>
       ) : models.length === 0 && !error ? (
@@ -169,12 +208,12 @@ export default function Models() {
         <div className="space-y-4">
           <h2 className="font-semibold text-lg">Whisper</h2>
           {models.filter((m) => m.kind === 'whisper').map((m) => (
-            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} onDownload={download} onDelete={del} onSwitch={switchModel} />
+            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} benchmark={benchmarks[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onBenchmark={benchmark} onDelete={del} onSwitch={switchModel} />
           ))}
 
           <h2 className="font-semibold text-lg pt-4">Qwen3-ASR</h2>
           {models.filter((m) => m.kind === 'qwen').map((m) => (
-            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} onDownload={download} onDelete={del} onSwitch={switchModel} />
+            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} benchmark={benchmarks[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onBenchmark={benchmark} onDelete={del} onSwitch={switchModel} />
           ))}
         </div>
       )}
@@ -208,10 +247,16 @@ function RuntimeItem({ label, value }) {
   return <div><p className="text-xs text-gray-400">{label}</p><p className="truncate" title={String(value)}>{value}</p></div>;
 }
 
-function ModelRow({ m, current, downloading, status, onDownload, onDelete, onSwitch }) {
+function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, onDownload, onCancel, onVerify, onBenchmark, onDelete, onSwitch }) {
   const isCurrent = current === m.id && m.installed;
   const isDownloading = downloading === m.id;
-  const dlStatus = status?.status;
+  const dlStatus = status?.status || m.status;
+  const state = { not_installed: '未安装', checking: '检查中', queued: '等待下载', downloading: '下载中', verifying: '验证中', ready: '可用', cancelled: '已取消', broken: '文件损坏', deleting: '删除中', error: '下载失败' }[dlStatus] || dlStatus;
+  const downloadedBytes = status?.downloadedBytes ?? m.downloadedBytes;
+  const totalBytes = status?.totalBytes ?? m.totalBytes;
+  const progress = status?.progress ?? m.progress;
+  const speed = status?.speedBytesPerSecond ?? m.speedBytesPerSecond;
+  const eta = status?.etaSeconds ?? m.etaSeconds;
 
   return (
     <div className="card p-5 flex items-center gap-4">
@@ -220,6 +265,7 @@ function ModelRow({ m, current, downloading, status, onDownload, onDelete, onSwi
           <p className="font-medium">{m.label}</p>
           {isCurrent && <span className="text-xs px-2 py-0.5 rounded-full bg-green-100 text-green-600 dark:bg-green-900/30 dark:text-green-400">当前使用</span>}
         </div>
+        <p className="text-xs mt-1">状态：{state} · 设备：{(m.supportedDevices || []).join(' / ')}</p>
         <p className="text-xs text-gray-400 mt-0.5">
           {m.kind === 'whisper' ? 'faster-whisper' : 'transformers'} · {m.id}
           {' · '}
@@ -229,33 +275,52 @@ function ModelRow({ m, current, downloading, status, onDownload, onDelete, onSwi
               : (m.estimated_size_bytes ? `约 ${formatBytes(m.estimated_size_bytes)}` : '')}
           </span>
         </p>
-        {isDownloading && (
+        {['queued', 'downloading', 'verifying'].includes(dlStatus) && (
           <div className="mt-2">
-            <div className="w-full h-1.5 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden">
+            {typeof progress === 'number' && <div className="w-full h-1.5 bg-gray-200 dark:bg-white/10 rounded-full overflow-hidden">
               <div className="h-full bg-apple-blue rounded-full transition-all" style={{
-                width: dlStatus === 'completed' ? '100%' : '40%'
+                width: `${progress}%`
               }} />
-            </div>
+            </div>}
             <p className="text-xs text-gray-400 mt-1">
-              {dlStatus === 'completed' ? '下载完成' : dlStatus === 'failed' ? '下载失败' : '下载中…'}
+              {downloadedBytes ? `已下载 ${formatBytes(downloadedBytes)}` : '正在连接模型仓库…'}
+              {totalBytes ? ` / ${formatBytes(totalBytes)}` : ''}{speed ? ` · ${formatBytes(speed)}/s` : ''}{eta ? ` · 约 ${formatDuration(eta)}` : ''}
             </p>
           </div>
         )}
+        {m.error && <p className="text-xs text-red-500 mt-2">{m.error.message || String(m.error)}</p>}
+        {benchmark?.status === 'running' && <p className="text-xs text-blue-500 mt-2">性能测试：{benchmark.stage}</p>}
+        {benchmark?.status === 'completed' && <BenchmarkResult result={benchmark.result} />}
       </div>
       <div className="flex gap-2 shrink-0">
-        {m.installed ? (
+        {['queued', 'downloading', 'verifying'].includes(dlStatus) ? (
+          <button className="btn-secondary !py-1.5 text-sm" onClick={() => onCancel(m.id)}>取消</button>
+        ) : ['checking', 'deleting'].includes(dlStatus) ? (
+          <button className="btn-secondary !py-1.5 text-sm" disabled>{state}</button>
+        ) : m.installed ? (
           <>
-            {!isCurrent && <button className="btn-secondary !py-1.5 text-sm" onClick={() => onSwitch(m.id)}>切换</button>}
+            {!isCurrent && <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady} onClick={() => onSwitch(m.id)}>切换</button>}
+            <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady || benchmark?.status === 'running'} onClick={() => onBenchmark(m.id)}>性能测试</button>
             <button className="btn-secondary !py-1.5 text-sm text-red-500" onClick={() => onDelete(m.id)}>删除</button>
           </>
         ) : (
-          <button className="btn-primary !py-1.5 text-sm" disabled={isDownloading} onClick={() => onDownload(m.id)}>
-            {isDownloading ? '下载中…' : '下载'}
-          </button>
+          <><button className="btn-primary !py-1.5 text-sm" disabled={!runtimeReady || isDownloading} onClick={() => onDownload(m.id)}>
+            {['cancelled', 'broken', 'error'].includes(dlStatus) ? '继续/重试' : '下载'}
+          </button>{dlStatus === 'broken' && <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady} onClick={() => onVerify(m.id)}>验证</button>}</>
         )}
       </div>
     </div>
   );
+}
+
+function BenchmarkResult({ result: r }) {
+  if (!r) return null;
+  return <div className="grid grid-cols-2 md:grid-cols-4 gap-2 text-xs mt-3 p-2 rounded bg-gray-50 dark:bg-white/5">
+    <span>设备 {r.device}</span><span>音频 {r.audioDurationSeconds?.toFixed(1)}s</span>
+    <span>模型加载 {(r.modelLoadMs / 1000).toFixed(2)}s</span><span>推理 {(r.inferenceMs / 1000).toFixed(2)}s</span>
+    <span>RTF {r.rtf?.toFixed(2)}</span><span>速度 {r.realtimeFactor?.toFixed(2)}x realtime</span>
+    <span>{r.coldStart ? '冷启动' : '热模型'}</span>
+  </div>;
 }
 
 function formatBytes(bytes) {
@@ -264,4 +329,10 @@ function formatBytes(bytes) {
   let i = 0;
   while (bytes >= 1024 && i < units.length - 1) { bytes /= 1024; i++; }
   return `${bytes.toFixed(1)} ${units[i]}`;
+}
+
+function formatDuration(seconds) {
+  if (seconds < 60) return `${Math.ceil(seconds)} 秒`;
+  if (seconds < 3600) return `${Math.ceil(seconds / 60)} 分钟`;
+  return `${(seconds / 3600).toFixed(1)} 小时`;
 }
