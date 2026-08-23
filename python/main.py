@@ -23,6 +23,9 @@ class TranscribeReq(BaseModel):
     model: str = "whisper-small"
     language: Optional[str] = None
     device: str = "auto"
+    compute_type: Optional[str] = None
+    audio_start: Optional[float] = None
+    audio_end: Optional[float] = None
 
 
 class DownloadReq(BaseModel):
@@ -132,9 +135,11 @@ def transcribe(req: TranscribeReq):
     try:
         if req.engine == "qwen":
             return transcribe_qwen.transcribe_pcm(pcm, req.model, req.language, req.device)
-        else:
+        elif req.engine == "whisper":
             size = req.model.replace("whisper-", "")
-            return transcribe_whisper.transcribe_pcm(pcm, size, req.language)
+            return transcribe_whisper.transcribe_pcm(pcm, size, req.language, req.device, req.compute_type)
+        else:
+            raise ValueError(f"未知本地 ASR engine: {req.engine}")
     except (ValueError, FileNotFoundError) as e:
         raise HTTPException(status_code=400, detail={"message": str(e), "type": type(e).__name__})
     except transcribe_qwen.QwenRuntimeError as e:

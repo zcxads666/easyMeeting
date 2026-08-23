@@ -28,6 +28,7 @@ MODEL_CATALOG = [
     *[{"id": f"whisper-{s}", "label": f"Whisper {s}", "engine": "whisper", "backend": "faster-whisper",
        "source": "huggingface", "estimatedSize": int(REFERENCE_SIZES_GB[f"whisper-{s}"] * 1024 ** 3),
        "supportedDevices": ["cpu", "cuda"], "recommendedDevice": "cuda" if s in ("medium", "large-v3") else "auto",
+       "computeTypes": {"cpu": ["int8", "float32"], "cuda": ["float16", "int8_float16", "float32"]},
        "supportsTimestamps": True, "supportsStreaming": False} for s in WHISPER_SIZES],
     *[{"id": mid, "label": mid.removeprefix("Qwen/"), "engine": "qwen", "backend": "transformers",
        "source": "huggingface", "estimatedSize": int(REFERENCE_SIZES_GB[mid] * 1024 ** 3),

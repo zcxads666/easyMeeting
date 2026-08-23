@@ -62,6 +62,22 @@ test('千问文件转写不把 file:// 本地路径当 file_url', async () => {
   await fsp.rm(dir, { recursive: true, force: true });
 });
 
+test('千问只返回完整文本时 timestamp 必须 unknown/null', async () => {
+  const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'asr-qwen-contract-'));
+  const filePath = path.join(dir, 'a.wav');
+  await fsp.writeFile(filePath, silenceWav());
+  globalThis.fetch = async () => ({ ok: true, status: 200, json: async () => ({
+    output: { choices: [{ message: { content: [{ text: '今天讨论项目进度' }] } }] }
+  }) });
+  const result = await qwenFileTranscribe({ filePath, fileName: 'a.wav' },
+    { asr: { qwen: { apiKey: 'sk-test', model: 'qwen3-asr-flash' } } });
+  assert.equal(result.segments.length, 1);
+  assert.deepEqual(result.segments[0], { start: null, end: null, speaker: null, confidence: null,
+    timing: 'unknown', text: '今天讨论项目进度' });
+  assert.ok(result.warnings.length);
+  await fsp.rm(dir, { recursive: true, force: true });
+});
+
 test('火山文件转写请求现行 flash 端点，失败必须 throw', async () => {
   const dir = await fsp.mkdtemp(path.join(os.tmpdir(), 'asr-volc-'));
   const filePath = path.join(dir, 'a.wav');

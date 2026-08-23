@@ -10,8 +10,8 @@ test('工厂包含四家 provider', () => {
   }
 });
 
-test('getProvider 未知类型回退 qwen', () => {
-  assert.equal(getProvider('unknown'), PROVIDERS.qwen);
+test('getProvider 未知类型明确报错，不静默回退 qwen', () => {
+  assert.throws(() => getProvider('unknown'), /未知 ASR provider/);
   assert.equal(getProvider('qwen'), PROVIDERS.qwen);
   assert.equal(getProvider('local'), PROVIDERS.local);
 });

@@ -32,7 +32,7 @@ function silenceWav() {
   ]);
 }
 
-export async function volcFileTranscribe({ filePath }, settings) {
+export async function volcFileTranscribe({ filePath, signal }, settings) {
   const { appid, token } = settings.asr.volc;
   if (!appid || !token) throw new Error('未配置火山 appid/token');
   const raw = await fsp.readFile(filePath);
@@ -46,7 +46,7 @@ export async function volcFileTranscribe({ filePath }, settings) {
       user: { uid: String(appid) },
       audio: { data: raw.toString('base64') },
       request: { model_name: 'bigmodel', enable_itn: true, show_utterances: true }
-    })
+    }), signal
   });
   return parseFlashResult(res);
 }
@@ -165,10 +165,14 @@ export function volcRealtime(settings) {
             const segs = (result?.utterances || []).map((u) => u.text).join('');
             const text = result?.text || segs;
             if (text) {
-              const definite = result?.utterances?.some((u) => u.definite) || result?.is_end;
-              emit(definite ? 'final' : 'partial', { text });
+            const definite = result?.utterances?.some((u) => u.definite) || result?.is_end;
+              emit(definite ? 'final' : 'partial', { text, start: null, end: null, speaker: null,
+                confidence: null, timing: 'unknown', provider: 'volc' });
             }
-          } catch {}
+          } catch (error) {
+            emit('error', { code: 'INVALID_PROVIDER_MESSAGE', message: error.message,
+              provider: 'volc', model: null, fatal: false });
+          }
         });
         ws.on('error', (e) => {
           emit('error', e);
@@ -184,10 +188,12 @@ export function volcRealtime(settings) {
     },
     async stop() {
       if (ws && ws.readyState === 1) {
-        try { ws.send(await packAudio(Buffer.alloc(0), true)); } catch {}
+        try { ws.send(await packAudio(Buffer.alloc(0), true)); }
+        catch (error) { emit('error', { code: 'STOP_FAILED', message: error.message, provider: 'volc', model: null, fatal: false }); }
       }
     },
-    close() { try { ws?.close(); } catch {} }
+    close() { try { ws?.close(); }
+      catch (error) { emit('error', { code: 'CLOSE_FAILED', message: error.message, provider: 'volc', model: null, fatal: false }); } }
   };
 }
 

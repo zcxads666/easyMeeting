@@ -8,7 +8,7 @@ import {
 } from '../services/store/jsonstore.js';
 import { isSupported, probe } from '../services/audio/ffmpeg.js';
 import { transcribeFile } from '../services/asr/index.js';
-import { queue } from '../services/queue.js';
+import { taskManager } from '../services/queue.js';
 import { getSettings } from '../services/store/jsonstore.js';
 import { UPLOADS_DIR } from '../config.js';
 
@@ -46,6 +46,8 @@ router.post('/', async (req, res) => {
   const { title = '未命名会议' } = req.body || {};
   const meeting = {
     id: randomUUID(),
+    schemaVersion: 2,
+    segmentTimeUnit: 'seconds',
     title,
     createdAt: Date.now(),
     updatedAt: Date.now(),
@@ -94,36 +96,44 @@ router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
     return res.status(400).json({ error: `不支持的格式，支持: ${['mp3','wav','ogg','webm','flac','aac','m4a','amr','opus','mp4','mkv','mov'].join(', ')}` });
   }
   const settings = await getSettings();
-  const taskId = randomUUID();
-
-  res.json({ taskId });
-
-  (async () => {
+  const lane = settings.asr.provider === 'local' ? 'local' : 'cloud';
+  await updateMeeting(meeting.id, { status: 'queued' });
+  const task = taskManager.create({ type: 'file_transcription', lane, metadata: { meetingId: meeting.id }, run: async (context) => {
     try {
-      queue.progress(taskId, { stage: 'probing', percent: 5 });
+      context.update('probing');
       const info = await probe(req.file.path);
-      queue.progress(taskId, { stage: 'transcoding', percent: 15 });
+      if (context.isCancellationRequested()) return null;
+      context.update('transcribing');
+      const duration = Number(info.format?.duration) || null;
       const result = await transcribeFile(settings.asr.provider, {
         filePath: req.file.path,
-        fileName: req.file.originalname
+        fileName: req.file.originalname,
+        duration,
+        signal: lane === 'cloud' ? context.signal : undefined,
+        updateStage: context.update
       }, settings);
-      queue.progress(taskId, { stage: 'saving', percent: 90 });
-      queue.progress(taskId, { stage: 'done', percent: 100 });
+      if (context.isCancellationRequested()) return null;
+      context.update('saving');
       const saved = await updateMeeting(meeting.id, {
+        schemaVersion: 2,
+        segmentTimeUnit: 'seconds',
         source: 'file',
         audioRef: req.file.path,
         rawText: result.text,
         segments: result.segments,
-        duration: Number(info.format?.duration) || 0,
+        duration: result.duration ?? duration ?? 0,
+        asr: { provider: result.provider, model: result.model, device: result.device,
+          latencyMs: result.latencyMs, realtimeFactor: result.realtimeFactor, warnings: result.warnings },
         status: 'transcribed'
       });
-      if (!saved) return;
-      queue.events.emit('result', { taskId, ok: true, meetingId: meeting.id });
+      if (!saved) throw Object.assign(new Error('会议已删除，转写结果未保存'), { code: 'MEETING_DELETED' });
+      return { meetingId: meeting.id, asr: result };
     } catch (err) {
-      await updateMeeting(meeting.id, { status: 'error' });
-      queue.events.emit('result', { taskId, ok: false, error: err.message });
+      if (!context.isCancellationRequested()) await updateMeeting(meeting.id, { status: 'error' });
+      throw err;
     }
-  })();
+  }});
+  res.json({ taskId: task.id });
 });
 
 export default router;

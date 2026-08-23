@@ -13,6 +13,8 @@ export default function Meeting() {
   const [error, setError] = useState('');
   const [uploading, setUploading] = useState(false);
   const [progress, setProgress] = useState(0);
+  const [taskStage, setTaskStage] = useState('');
+  const [activeTaskId, setActiveTaskId] = useState(null);
   const [copiedIdx, setCopiedIdx] = useState(-1);
   const mediaRef = useRef(null);
   const audioCtxRef = useRef(null);
@@ -117,11 +119,12 @@ export default function Meeting() {
     setError('');
     try {
       const taskId = await uploadMeeting(id, file);
-      const onProgress = ({ taskId: tid, percent, stage }) => {
+      setActiveTaskId(taskId);
+      const onProgress = ({ taskId: tid, stage }) => {
         if (tid !== taskId) return;
-        setProgress(percent || 0);
+        setTaskStage(stage || 'queued');
       };
-      const onDone = ({ taskId: tid, ok, error: err }) => {
+      const onDone = ({ taskId: tid, ok, error: err, status }) => {
         if (tid !== taskId) return;
         socket.off('task:progress', onProgress);
         socket.off('task:done', onDone);
@@ -129,9 +132,11 @@ export default function Meeting() {
           setProgress(100);
           api(`/meetings/${id}`).then(setMeeting).catch(() => {});
         } else {
-          setError(err || '转写失败');
+          setError(status === 'cancelled' ? '任务已取消' : (err || '转写失败'));
         }
         setUploading(false);
+        setActiveTaskId(null);
+        setTaskStage('');
         setTimeout(() => setProgress(0), 1500);
       };
       socket.on('task:progress', onProgress);
@@ -139,6 +144,7 @@ export default function Meeting() {
     } catch (e) {
       setError(e.message);
       setUploading(false);
+      setActiveTaskId(null);
     }
   };
 
@@ -173,9 +179,14 @@ export default function Meeting() {
           {recording ? '■ 停止' : '● 开始录音'}
         </button>
         <label className="btn-secondary cursor-pointer relative overflow-hidden">
-          {uploading ? `转写中 ${progress}%` : '上传录音文件'}
+          {uploading ? taskStageLabel(taskStage) : '上传录音文件'}
           <input type="file" accept=".mp3,.wav,.ogg,.webm,.flac,.aac,.m4a,.amr,.opus,.mp4,.mkv,.mov,audio/*" className="hidden" onChange={(e) => onUpload(e.target.files)} disabled={uploading} />
         </label>
+        {uploading && activeTaskId && (
+          <button className="btn-secondary text-red-500" onClick={() => api(`/tasks/${activeTaskId}/cancel`, { method: 'POST' })}>
+            取消任务
+          </button>
+        )}
         {meeting.rawText && (
           <Link to={`/summary/${id}`} className="btn-primary ml-auto">生成纪要 →</Link>
         )}
@@ -242,4 +253,10 @@ function uint8ToBase64(uint8) {
     binary += String.fromCharCode.apply(null, chunk);
   }
   return btoa(binary);
+}
+
+function taskStageLabel(stage) {
+  return ({ queued: '等待中', preparing: '准备中', probing: '读取音频', transcoding: '转码中',
+    loading_model: '加载模型', transcribing: '转写中', saving: '保存中', completed: '完成',
+    failed: '失败', cancelled: '已取消' })[stage] || '处理中';
 }

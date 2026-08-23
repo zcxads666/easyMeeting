@@ -3,7 +3,7 @@ import { transcodeToWav, toBase64DataUri, mimeFor } from '../audio/ffmpeg.js';
 /* MiMo：OpenAI 兼容 chat/completions，input_audio base64 */
 const BASE = 'https://api.xiaomimimo.com/v1';
 
-async function chatCompletions(settings, { audioDataUri, stream = false }) {
+async function chatCompletions(settings, { audioDataUri, stream = false, signal }) {
   const { apiKey, model } = settings.asr.mimo;
   if (!apiKey) throw new Error('未配置 MiMo API Key');
   const res = await fetch(`${BASE}/chat/completions`, {
@@ -14,20 +14,22 @@ async function chatCompletions(settings, { audioDataUri, stream = false }) {
       stream,
       messages: [{ role: 'user', content: [{ type: 'input_audio', input_audio: { data: audioDataUri } }] }],
       asr_options: { language: 'auto' }
-    })
+    }), signal
   });
   const json = await res.json();
   if (!res.ok) throw new Error(`MiMo 调用失败: ${JSON.stringify(json)}`);
   return json;
 }
 
-export async function mimoFileTranscribe({ filePath, fileName }, settings) {
+export async function mimoFileTranscribe({ filePath, fileName, signal, updateStage }, settings) {
   const { apiKey, model } = settings.asr.mimo;
   if (!apiKey) throw new Error('未配置 MiMo API Key');
   if (!model) throw new Error('未配置 MiMo 模型');
+  updateStage?.('transcoding');
   const wavPath = await transcodeToWav(filePath, `mimo_${Date.now()}.wav`);
+  updateStage?.('transcribing');
   const dataUri = await toBase64DataUri(wavPath, mimeFor('.wav'));
-  const json = await chatCompletions(settings, { audioDataUri: dataUri });
+  const json = await chatCompletions(settings, { audioDataUri: dataUri, signal });
   const text = (json.choices?.[0]?.message?.content || '').trim();
   return { segments: splitSegments(text), text };
 }
@@ -39,6 +41,7 @@ export function mimoRealtime(settings) {
   const buffer = [];
   const MAX = 8 * 16000 * 2; // 8 秒 pcm
   let timer = null;
+  let closed = false;
 
   return {
     on(evt, fn) { emitMap.set(evt, [...(emitMap.get(evt) || []), fn]); },
@@ -55,7 +58,7 @@ export function mimoRealtime(settings) {
       return Promise.resolve();
     },
     async stop() { await flush(); },
-    close() { clearInterval(timer); }
+    close() { clearInterval(timer); if (!closed) { closed = true; emit('close', {}); } }
   };
 
   async function flush() {
@@ -75,7 +78,7 @@ export function mimoRealtime(settings) {
 
 function splitSegments(text) {
   return text.split(/[。！？!?\n]+/).map((s) => s.trim()).filter(Boolean)
-    .map((t) => ({ start: 0, end: 0, text: t }));
+    .map((t) => ({ start: null, end: null, speaker: null, confidence: null, timing: 'unknown', text: t }));
 }
 
 // 将 16kHz 16bit mono PCM Buffer 转为 WAV Buffer

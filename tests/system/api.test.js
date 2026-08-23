@@ -310,6 +310,17 @@ test('验收4c: 上传音频文件服务', async () => {
   assert.equal(res.status, 200, 'WAV 上传应受理');
   const { taskId } = await res.json();
   assert.ok(taskId);
-  // 任务最终以 task:done 结束（qwen 未配置 key 会失败但不崩溃）
+  let task;
+  for (let i = 0; i < 40; i++) {
+    ({ data: task } = await api('GET', `/api/tasks/${taskId}`));
+    if (['completed', 'failed', 'cancelled'].includes(task.status)) break;
+    await sleep(50);
+  }
+  assert.equal(task.id, taskId);
+  assert.equal(task.type, 'file_transcription');
+  assert.equal(task.status, 'failed');
+  assert.equal(typeof task.error?.message, 'string');
+  const { data: failedMeeting } = await api('GET', `/api/meetings/${m.id}`);
+  assert.equal(failedMeeting.status, 'error');
   await api('DELETE', `/api/meetings/${m.id}`);
 });

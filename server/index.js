@@ -7,11 +7,12 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Server } from 'socket.io';
 import { PORT, ROOT, UPLOADS_DIR } from './config.js';
 import { ensureDirs } from './services/store/jsonstore.js';
-import { queue } from './services/queue.js';
+import { taskManager } from './services/queue.js';
 import meetingsRoute from './routes/meetings.js';
 import settingsRoute from './routes/settings.js';
 import modelsRoute from './routes/models.js';
 import llmRoute from './routes/llm.js';
+import tasksRoute from './routes/tasks.js';
 import { setupRealtime } from './socket/realtime.js';
 import { spawnPython, getRuntimeHealth } from './services/python.js';
 import { checkFFmpeg } from './services/audio/ffmpeg.js';
@@ -79,6 +80,7 @@ export function createServer(options = {}) {
   app.use('/api/settings', settingsRoute);
   app.use('/api/models', modelsRoute);
   app.use('/api/llm', llmRoute);
+  app.use('/api/tasks', tasksRoute);
   app.use('/uploads', express.static(UPLOADS_DIR));
 
   const dist = path.join(ROOT, 'web', 'dist');
@@ -107,11 +109,14 @@ export function createServer(options = {}) {
 
   setupRealtime(io, options.createRealtimeStream);
 
-  queue.onProgress(({ taskId, ...data }) => io.emit('task:progress', { taskId, ...data }));
-  queue.onDone(() => {});
-  queue.events.on('result', ({ taskId, ok, meetingId, error }) => {
-    io.emit('task:done', { taskId, ok, meetingId, error });
-  });
+  const onTaskUpdated = (task) => {
+    io.emit('task:progress', { taskId: task.id, ...task });
+    if (['completed', 'failed', 'cancelled'].includes(task.status)) {
+      io.emit('task:done', { taskId: task.id, ok: task.status === 'completed', status: task.status,
+        meetingId: task.result?.meetingId, error: task.error?.message, result: task.result });
+    }
+  };
+  taskManager.events.on('updated', onTaskUpdated);
 
   return {
     app,
@@ -128,6 +133,7 @@ export function createServer(options = {}) {
       });
     },
     async stop() {
+      taskManager.events.off('updated', onTaskUpdated);
       io.close();
       await new Promise((resolve) => server.close(() => resolve()));
     }

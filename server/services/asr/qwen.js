@@ -1,18 +1,5 @@
 import { transcodeToWav, toBase64DataUri, mimeFor } from '../audio/ffmpeg.js';
 
-function normalizeSegments(rawText, baseMs = 0, stepMs = 3000) {
-  const sentences = rawText
-    .split(/[。！？!?\n]+/)
-    .map((s) => s.trim())
-    .filter(Boolean);
-  let offset = 0;
-  return sentences.map((text) => {
-    const seg = { start: baseMs + offset, end: baseMs + offset + Math.max(stepMs, text.length * 120), text };
-    offset += seg.end - seg.start;
-    return seg;
-  });
-}
-
 export const QWEN_ASR_URL = 'https://dashscope.aliyuncs.com/api/v1/services/aigc/multimodal-generation/generation';
 const QWEN_FILE_MODEL = 'qwen3-asr-flash';
 
@@ -33,7 +20,7 @@ function extractQwenText(json) {
 /* ---------------- 千问 ---------------- */
 
 // 本地文件：DashScope 同步 ASR（qwen3-asr-flash + base64 Data URL），禁止 file://
-export async function qwenFileTranscribe({ filePath, fileName }, settings) {
+export async function qwenFileTranscribe({ filePath, fileName, signal, updateStage }, settings) {
   const { apiKey } = settings.asr.qwen;
   if (!apiKey) throw new Error('未配置千问 API Key');
   const model = fileAsrModel(settings.asr.qwen.model);
@@ -42,8 +29,10 @@ export async function qwenFileTranscribe({ filePath, fileName }, settings) {
   try {
     dataUri = await toBase64DataUri(filePath, mime === 'application/octet-stream' ? 'audio/wav' : mime);
   } catch (e) {
+    updateStage?.('transcoding');
     const wavPath = await transcodeToWav(filePath, `qwen_${Date.now()}.wav`);
     dataUri = await toBase64DataUri(wavPath, mimeFor('.wav'));
+    updateStage?.('transcribing');
   }
 
   const res = await fetch(QWEN_ASR_URL, {
@@ -58,7 +47,7 @@ export async function qwenFileTranscribe({ filePath, fileName }, settings) {
         ]
       },
       parameters: { asr_options: { enable_itn: true } }
-    })
+    }), signal
   });
   const json = await res.json().catch(() => ({}));
   if (res.status === 401 || res.status === 403) {
@@ -69,7 +58,8 @@ export async function qwenFileTranscribe({ filePath, fileName }, settings) {
   }
   const text = extractQwenText(json);
   if (!text) throw new Error(`千问转写未返回文本: ${JSON.stringify(json).slice(0, 300)}`);
-  return { segments: normalizeSegments(text), text };
+  return { segments: [{ start: null, end: null, speaker: null, confidence: null, timing: 'unknown', text }], text,
+    language: null, model, device: null, warnings: ['千问响应未提供可验证的分段时间戳'] };
 }
 
 // 实时：DashScope WebSocket duplex
@@ -99,13 +89,17 @@ export function qwenRealtime(settings) {
       });
       ws.on('message', (data) => {
         let msg;
-        try { msg = JSON.parse(data.toString()); } catch { return; }
+        try { msg = JSON.parse(data.toString()); }
+        catch (error) { emit('error', { code: 'INVALID_PROVIDER_MESSAGE', message: error.message,
+          provider: 'qwen', model, fatal: false }); return; }
         const event = msg.header?.event;
         if (event === 'task-started') taskStarted = true;
         else if (event === 'result-generated') {
           const text = msg.payload?.output?.sentence?.text;
-          if (text) emit('partial', { text });
-          if (msg.payload?.output?.sentence?.isSentenceEnd) emit('final', { text });
+          if (text) emit('partial', { text, provider: 'qwen', model });
+          if (msg.payload?.output?.sentence?.isSentenceEnd) emit('final', {
+            text, start: null, end: null, speaker: null, confidence: null, timing: 'unknown', provider: 'qwen', model
+          });
         } else if (event === 'task-finished') { emit('close', {}); ws?.close(); }
         else if (event === 'task-failed') emit('error', new Error(msg.header?.error_message || '千问任务失败'));
       });
@@ -122,7 +116,8 @@ export function qwenRealtime(settings) {
         ws.send(JSON.stringify({ header: { action: 'finish-task', task_id: taskId, streaming: 'duplex' }, payload: { input: {} } }));
       }
     },
-    close() { try { ws?.close(); } catch {} }
+    close() { try { ws?.close(); } catch (error) { emit('error', { code: 'CLOSE_FAILED', message: error.message,
+      provider: 'qwen', model, fatal: false }); } }
   };
 }
 

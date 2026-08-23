@@ -70,10 +70,13 @@ def transcribe_pcm(pcm_bytes, model_id, language=None, device="auto"):
         error = QwenRuntimeError("Qwen3-ASR 推理失败", model=model_id, device=resolved, cause=exc)
         logger.exception("Qwen inference failed context=%s", error.context)
         raise error from exc
+    duration = len(samples) / 16000
+    latency_ms = round((time.perf_counter() - started) * 1000)
     return {"segments": [{"start": None, "end": None, "speaker": None, "text": text,
                            "confidence": None, "timing": "unknown"}] if text else [],
             "text": text, "language": language, "model": model_id, "device": key[1],
-            "backend": key[3], "latencyMs": round((time.perf_counter() - started) * 1000),
+            "duration": duration, "backend": key[3], "latencyMs": latency_ms,
+            "realtimeFactor": duration / (latency_ms / 1000) if latency_ms > 0 else None,
             "warnings": [] if text else ["模型未返回文本"]}
 
 def transcribe_file_pcm(path, model_id, language=None, device="auto"):
