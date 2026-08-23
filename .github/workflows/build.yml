@@ -49,6 +49,9 @@ jobs:
       - name: Install Node dependencies
         run: npm ci
 
+      - name: Build web renderer
+        run: npm run build
+
       - name: Create Python test runtime
         run: npm run setup:python
 
@@ -57,9 +60,6 @@ jobs:
 
       - name: Run Python tests
         run: npm run test:python
-
-      - name: Build web renderer
-        run: npm run build
 
       - name: Check patch whitespace
         run: git diff --check
