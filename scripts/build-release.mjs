@@ -35,7 +35,7 @@ await cp(path.join(ROOT, 'server'), path.join(PKG_DIR, 'server'), { recursive: t
 await cp(path.join(ROOT, 'web', 'dist'), path.join(PKG_DIR, 'web', 'dist'), { recursive: true });
 // Python 推理服务源码（不含 venv，首次启动自动安装）
 await mkdir(path.join(PKG_DIR, 'python'), { recursive: true });
-for (const f of ['main.py', 'model_manager.py', 'transcribe_whisper.py', 'transcribe_qwen.py', 'requirements.txt']) {
+for (const f of ['main.py', 'model_manager.py', 'runtime.py', 'transcribe_whisper.py', 'transcribe_qwen.py', 'requirements.txt']) {
   await copyFile(path.join(ROOT, 'python', f), path.join(PKG_DIR, 'python', f));
 }
 // 测试目录（便于用户验证）

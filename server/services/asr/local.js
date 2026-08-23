@@ -20,8 +20,8 @@ async function callPython(path, body) {
 
 export async function localFileTranscribe({ filePath, fileName }, settings) {
   const pcmPath = await transcodeToPcm(filePath, `local_${Date.now()}.pcm`);
-  const { engine, model } = settings.asr.local;
-  const json = await callPython('/transcribe', { file: pcmPath, engine, model });
+  const { engine, model, device = 'auto' } = settings.asr.local;
+  const json = await callPython('/transcribe', { file: pcmPath, engine, model, device });
   return { segments: json.segments || [], text: json.text || '' };
 }
 
@@ -49,8 +49,8 @@ export function localRealtime(settings) {
     busy = true;
     const pcm = Buffer.concat(buffer.splice(0, buffer.length));
     try {
-      const { engine, model } = settings.asr.local;
-      const json = await callPython('/transcribe', { pcm: pcm.toString('base64'), engine, model });
+      const { engine, model, device = 'auto' } = settings.asr.local;
+      const json = await callPython('/transcribe', { pcm: pcm.toString('base64'), engine, model, device });
       if (json.text) emit('final', { text: json.text });
     } catch (e) {
       emit('error', e);
@@ -65,7 +65,7 @@ export function localRealtime(settings) {
 // 轻量可用性验证：推理服务健康 + 当前模型已安装
 export async function localTest(settings) {
   const { engine, model } = settings.asr.local;
-  const health = await fetch(`${getPythonUrl()}/health`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
+  const health = await fetch(`${getPythonUrl()}/runtime/health`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
   if (!health || !health.ok) throw new Error('本地推理服务未启动，请运行 npm run setup:python');
   if (!model) throw new Error('未配置本地模型，请前往「模型」页选择');
   const modelsRes = await fetch(`${getPythonUrl()}/models`, { signal: AbortSignal.timeout(3000) }).catch(() => null);
@@ -73,5 +73,9 @@ export async function localTest(settings) {
   const m = (data.models || []).find((x) => x.id === model);
   if (!m) throw new Error(`模型不存在: ${model}`);
   if (!m.installed) throw new Error(`模型未安装: ${model}，请前往「模型」页下载`);
+  const runtime = await health.json();
+  if (!runtime.dependencies?.ok || !runtime.modelRuntime?.available) {
+    throw new Error(`本地运行环境不完整: ${runtime.modelRuntime?.error || '缺少依赖'}`);
+  }
   return `本地推理服务正常（${engine}），模型 ${model} 已安装`;
 }

@@ -255,6 +255,17 @@ export async function isHealthy() {
   }
 }
 
+export async function getRuntimeHealth() {
+  try {
+    const res = await fetch(`${getPythonUrl()}/runtime/health`, { signal: AbortSignal.timeout(3000) });
+    if (!res.ok) return { daemon: true, dependencies: { ok: false }, error: `HTTP ${res.status}` };
+    return await res.json();
+  } catch (e) {
+    return { daemon: false, dependencies: { ok: false }, ffmpeg: { available: false },
+      modelRuntime: { available: false }, error: `${e.name}: ${e.message}` };
+  }
+}
+
 // 是否有模型下载任务进行中（下载期间重启 Python 会中断下载线程）
 async function hasActiveDownload() {
   try {

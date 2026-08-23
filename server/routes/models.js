@@ -41,6 +41,8 @@ async function proxy(path, req, res, { fresh = false } = {}) {
 }
 
 router.get('/', (req, res) => proxy('/models', req, res, { fresh: true }));
+router.get('/runtime/capabilities', (req, res) => proxy('/runtime/capabilities', req, res, { fresh: true }));
+router.get('/runtime/health', (req, res) => proxy('/runtime/health', req, res, { fresh: true }));
 router.get('/download/status', (req, res) => proxy('/models/download/status', req, res, { fresh: true }));
 router.post('/download', (req, res) => proxy('/models/download', req, res));
 router.post('/switch', (req, res) => proxy('/models/switch', req, res));

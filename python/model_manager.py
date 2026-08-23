@@ -1,15 +1,15 @@
 import os
-import glob
-import json
 import shutil
 import subprocess
+import logging
 from pathlib import Path
 
 MODELS_DIR = Path(os.environ.get("MEETING_MODELS_DIR", Path.home() / ".meeting" / "models"))
+logger = logging.getLogger("meeting.model")
 
 # 可管理的本地模型目录
 WHISPER_SIZES = ["tiny", "base", "small", "medium", "large-v3"]
-QWEN_MODELS = ["Qwen/Qwen3-ASR-0.6B", "Qwen/Qwen3-ASR-1.7B"]
+QWEN_MODELS = ["Qwen/Qwen3-ASR-0.6B-hf", "Qwen/Qwen3-ASR-1.7B-hf"]
 
 DEFAULT_SOURCE = os.environ.get("MEETING_MODEL_SOURCE", "modelscope")  # modelscope | huggingface
 
@@ -20,9 +20,20 @@ REFERENCE_SIZES_GB = {
     "whisper-small": 0.5,
     "whisper-medium": 1.5,
     "whisper-large-v3": 3.0,
-    "Qwen/Qwen3-ASR-0.6B": 1.2,
-    "Qwen/Qwen3-ASR-1.7B": 3.4,
+    "Qwen/Qwen3-ASR-0.6B-hf": 1.6,
+    "Qwen/Qwen3-ASR-1.7B-hf": 3.8,
 }
+
+MODEL_CATALOG = [
+    *[{"id": f"whisper-{s}", "label": f"Whisper {s}", "engine": "whisper", "backend": "faster-whisper",
+       "source": "huggingface", "estimatedSize": int(REFERENCE_SIZES_GB[f"whisper-{s}"] * 1024 ** 3),
+       "supportedDevices": ["cpu", "cuda"], "recommendedDevice": "cuda" if s in ("medium", "large-v3") else "auto",
+       "supportsTimestamps": True, "supportsStreaming": False} for s in WHISPER_SIZES],
+    *[{"id": mid, "label": mid.removeprefix("Qwen/"), "engine": "qwen", "backend": "transformers",
+       "source": "huggingface", "estimatedSize": int(REFERENCE_SIZES_GB[mid] * 1024 ** 3),
+       "supportedDevices": ["cpu", "cuda", "mps"], "recommendedDevice": "auto",
+       "supportsTimestamps": False, "supportsStreaming": False} for mid in QWEN_MODELS],
+]
 
 
 # 目录占用缓存：key=目录绝对路径，value=(目录 mtime_ns, size_bytes)
@@ -49,7 +60,8 @@ def _du_size(d):
         ).stdout
         kb = int(out.split()[0])
         return kb * 1024
-    except Exception:
+    except (OSError, subprocess.SubprocessError, ValueError, IndexError) as exc:
+        logger.warning("du failed for %s (%s: %s), using portable directory walk", d, type(exc).__name__, exc)
         return _walk_size(d)
 
 
@@ -82,26 +94,24 @@ def _qwen_local_dir(model_id):
     return MODELS_DIR / f"qwen-{name}"
 
 
-def _append_model(models, mid, kind, label, d):
+def _append_model(models, catalog, d):
     installed = exists(d)
     models.append({
-        "id": mid,
-        "kind": kind,
-        "label": label,
+        **catalog,
+        "kind": catalog["engine"],
         "installed": installed,
         "path": str(d),
         "size_bytes": dir_size_bytes(d) if installed else 0,
-        "estimated_size_bytes": int(REFERENCE_SIZES_GB.get(mid, 0) * 1024 ** 3),
+        "estimated_size_bytes": catalog["estimatedSize"],
     })
 
 
 def list_models():
     ensure_dir()
     models = []
-    for size in WHISPER_SIZES:
-        _append_model(models, f"whisper-{size}", "whisper", f"Whisper {size}", _whisper_local_dir(size))
-    for mid in QWEN_MODELS:
-        _append_model(models, mid, "qwen", mid, _qwen_local_dir(mid))
+    for item in MODEL_CATALOG:
+        d = _whisper_local_dir(item["id"].removeprefix("whisper-")) if item["engine"] == "whisper" else _qwen_local_dir(item["id"])
+        _append_model(models, item, d)
     return models
 
 
@@ -146,9 +156,9 @@ def download_whisper(size, progress_cb=None):
 def download_qwen(model_id, progress_cb=None):
     ensure_dir()
     dest = _qwen_local_dir(model_id)
-    _require("modelscope", "请运行: python/.venv/bin/pip install modelscope")
-    from modelscope import snapshot_download as ms_download
-    ms_download(model_id, local_dir=str(dest))
+    _require("huggingface_hub", "请运行: python/.venv/bin/pip install huggingface_hub")
+    from huggingface_hub import snapshot_download
+    snapshot_download(repo_id=model_id, local_dir=str(dest))
     return dest
 
 
@@ -185,7 +195,7 @@ def delete(id):
         raise ValueError(f"模型不存在: {id}")
     d = Path(m["path"])
     if d.is_dir():
-        shutil.rmtree(d, ignore_errors=True)
+        shutil.rmtree(d)
     return {"ok": True, "id": id}
 
 

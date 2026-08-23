@@ -179,7 +179,11 @@ test('验收3: 模型代理路由（不下载真实模型）', async () => {
   }
   assert.equal(res.status, 200);
   assert.ok(Array.isArray(data.models));
-  assert.ok(data.models.some((m) => m.id === 'Qwen/Qwen3-ASR-0.6B'));
+  const qwen = data.models.find((m) => m.id === 'Qwen/Qwen3-ASR-0.6B-hf');
+  assert.ok(qwen);
+  assert.equal(qwen.backend, 'transformers');
+  assert.equal(qwen.source, 'huggingface');
+  assert.ok(qwen.supportedDevices.includes('cpu'));
 
   const { res: r2, data: d2 } = await api('POST', '/api/models/download', { id: 'not-a-real-model' });
   assert.equal(r2.status, 400);
@@ -189,6 +193,18 @@ test('验收3: 模型代理路由（不下载真实模型）', async () => {
   assert.notEqual(r3.status, 404, `斜杠 id 应匹配删除路由, got ${r3.status}`);
   assert.equal(r3.status, 400);
   assert.match(JSON.stringify(d3), /不存在|未知/);
+});
+
+test('runtime capability/health 通过 Node 返回结构化状态', async () => {
+  const { res: capRes, data: cap } = await api('GET', '/api/models/runtime/capabilities');
+  const { res: healthRes, data: health } = await api('GET', '/api/models/runtime/health');
+  assert.equal(capRes.status, 200);
+  assert.equal(healthRes.status, 200);
+  assert.equal(cap.devices.cpu.available, true);
+  assert.equal(typeof health.daemon, 'boolean');
+  assert.equal(typeof health.dependencies.ok, 'boolean');
+  assert.equal(typeof health.ffmpeg.available, 'boolean');
+  assert.equal(typeof health.modelRuntime.available, 'boolean');
 });
 
 test('未知会议 GET 返回 404', async () => {

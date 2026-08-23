@@ -13,7 +13,7 @@ import settingsRoute from './routes/settings.js';
 import modelsRoute from './routes/models.js';
 import llmRoute from './routes/llm.js';
 import { setupRealtime } from './socket/realtime.js';
-import { spawnPython, isHealthy } from './services/python.js';
+import { spawnPython, getRuntimeHealth } from './services/python.js';
 import { checkFFmpeg } from './services/audio/ffmpeg.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -86,7 +86,7 @@ export function createServer(options = {}) {
   app.get('/api/health', async (_req, res) => {
     res.json({
       ffmpeg: await checkFFmpeg(),
-      python: await isHealthy()
+      python: await getRuntimeHealth()
     });
   });
 

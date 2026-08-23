@@ -14,8 +14,9 @@ test('产品目录使用可下载的 Qwen3-ASR Hub id，不含 Flash/FileTrans',
   const src = await fsp.readFile(path.join(ROOT, 'python/model_manager.py'), 'utf8');
   assert.doesNotMatch(src, /Qwen3-ASR-Flash/);
   assert.doesNotMatch(src, /FileTrans/);
-  assert.match(src, /Qwen\/Qwen3-ASR-0\.6B/);
-  assert.match(src, /Qwen\/Qwen3-ASR-1\.7B/);
+  assert.match(src, /Qwen\/Qwen3-ASR-0\.6B-hf/);
+  assert.match(src, /Qwen\/Qwen3-ASR-1\.7B-hf/);
+  assert.match(src, /MODEL_CATALOG/);
 });
 
 test('FastAPI delete 路由支持带斜杠 model_id', async () => {
@@ -27,56 +28,30 @@ test('未知模型 download 立刻 failed；斜杠 id 的 delete 能匹配', asy
   await fsp.access(PY);
   const { modelsDir } = makeTestDirs();
   const script = `
-import json, os, sys, threading, time, socket
-from urllib.request import Request, urlopen
-from urllib.error import HTTPError
-
+import asyncio, json, os, sys
+from fastapi import HTTPException
 os.environ["MEETING_MODELS_DIR"] = sys.argv[1]
-import uvicorn
 import main
 
-sock = socket.socket()
-sock.bind(("127.0.0.1", 0))
-port = sock.getsockname()[1]
-sock.close()
-
-def serve():
-    uvicorn.run(main.app, host="127.0.0.1", port=port, log_level="error")
-
-threading.Thread(target=serve, daemon=True).start()
-for _ in range(80):
+async def run():
     try:
-        urlopen(f"http://127.0.0.1:{port}/health", timeout=0.2)
-        break
-    except Exception:
-        time.sleep(0.05)
-else:
-    raise SystemExit("uvicorn not ready")
-
-def req(method, path, body=None):
-    data = None if body is None else json.dumps(body).encode()
-    r = Request(f"http://127.0.0.1:{port}{path}", data=data, method=method)
-    if body is not None:
-        r.add_header("Content-Type", "application/json")
+        await main.download(main.DownloadReq(id="not-a-real-model"))
+        dl_code, dl_body = 200, {}
+    except HTTPException as exc:
+        dl_code, dl_body = exc.status_code, {"detail": exc.detail}
+    st_body = main.download_status()
     try:
-        with urlopen(r, timeout=5) as resp:
-            return resp.status, json.loads(resp.read().decode())
-    except HTTPError as e:
-        return e.code, json.loads(e.read().decode())
+        del_body = await main.delete_model("Qwen/Qwen3-ASR-0.6B-hf")
+        del_code = 200
+    except HTTPException as exc:
+        del_code, del_body = exc.status_code, {"detail": exc.detail}
+    main._download_status["whisper-tiny"] = {"status": "completed", "progress": 100}
+    again_body = await main.download(main.DownloadReq(id="whisper-tiny"))
+    print(json.dumps({"download_status": dl_code, "download_body": dl_body,
+      "status_map": st_body.get("downloads", {}), "delete_status": del_code,
+      "delete_body": del_body, "completed_again": again_body}))
 
-dl_code, dl_body = req("POST", "/models/download", {"id": "not-a-real-model"})
-st_code, st_body = req("GET", "/models/download/status")
-del_code, del_body = req("DELETE", "/models/Qwen/Qwen3-ASR-0.6B")
-main._download_status["whisper-tiny"] = {"status": "completed", "progress": 100}
-again_code, again_body = req("POST", "/models/download", {"id": "whisper-tiny"})
-print(json.dumps({
-  "download_status": dl_code,
-  "download_body": dl_body,
-  "status_map": st_body.get("downloads", {}),
-  "delete_status": del_code,
-  "delete_body": del_body,
-  "completed_again": again_body
-}))
+asyncio.run(run())
 `;
   const out = await new Promise((resolve, reject) => {
     const child = spawn(PY, ['-c', script, modelsDir], {

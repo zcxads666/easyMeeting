@@ -33,7 +33,7 @@ export const DEFAULT_SETTINGS = {
     qwen: { apiKey: '', model: 'qwen3-asr-flash' },
     volc: { appid: '', token: '', cluster: 'volcengine_input_common' },
     mimo: { apiKey: '', model: 'mimo-v2.5-asr' },
-    local: { engine: 'whisper', model: 'whisper-large-v3' }
+    local: { engine: 'whisper', model: 'whisper-large-v3', device: 'auto' }
   },
   correction: { enabled: true },
   ui: { theme: 'light' }

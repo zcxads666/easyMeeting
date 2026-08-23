@@ -11,6 +11,7 @@ from typing import Optional
 import model_manager
 import transcribe_whisper
 import transcribe_qwen
+import runtime
 
 app = FastAPI(title="Meeting Local Inference")
 
@@ -21,6 +22,7 @@ class TranscribeReq(BaseModel):
     engine: str = "whisper"
     model: str = "whisper-small"
     language: Optional[str] = None
+    device: str = "auto"
 
 
 class DownloadReq(BaseModel):
@@ -39,6 +41,12 @@ _download_lock = threading.Lock()
 @app.get("/health")
 def health():
     return {"ok": True, "models_dir": str(model_manager.MODELS_DIR)}
+
+@app.get("/runtime/capabilities")
+def runtime_capabilities(): return runtime.capabilities()
+
+@app.get("/runtime/health")
+def runtime_health(): return runtime.health()
 
 
 @app.get("/models")
@@ -123,12 +131,16 @@ def transcribe(req: TranscribeReq):
 
     try:
         if req.engine == "qwen":
-            return transcribe_qwen.transcribe_pcm(pcm, req.model, req.language)
+            return transcribe_qwen.transcribe_pcm(pcm, req.model, req.language, req.device)
         else:
             size = req.model.replace("whisper-", "")
             return transcribe_whisper.transcribe_pcm(pcm, size, req.language)
+    except (ValueError, FileNotFoundError) as e:
+        raise HTTPException(status_code=400, detail={"message": str(e), "type": type(e).__name__})
+    except transcribe_qwen.QwenRuntimeError as e:
+        raise HTTPException(status_code=500, detail={"message": str(e), **e.context})
     except Exception as e:
-        raise HTTPException(status_code=500, detail=f"转写失败: {e}")
+        raise HTTPException(status_code=500, detail={"message": str(e), "type": type(e).__name__})
 
 
 if __name__ == "__main__":

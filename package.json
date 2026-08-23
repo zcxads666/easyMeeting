@@ -12,6 +12,7 @@
     "postinstall": "echo '[meeting] run: npm run setup:python to install Python deps'",
     "setup:python": "python3 -m venv python/.venv && python/.venv/bin/pip install --upgrade pip && python/.venv/bin/pip install -r python/requirements.txt",
     "test": "node --test \"tests/unit/*.test.js\" \"tests/system/*.test.js\"",
+    "test:python": "python3 -m unittest discover -s python/tests -p 'test_*.py'",
     "dist": "node scripts/build-release.mjs",
     "desktop": "electron .",
     "desktop:dev": "concurrently -k -n web,electron \"npm:dev:web\" \"electron . --dev\"",
@@ -54,6 +55,7 @@
       "python/model_manager.py",
       "python/transcribe_whisper.py",
       "python/transcribe_qwen.py",
+      "python/runtime.py",
       "python/requirements.txt",
       "package.json"
     ],
@@ -62,6 +64,7 @@
       "python/model_manager.py",
       "python/transcribe_whisper.py",
       "python/transcribe_qwen.py",
+      "python/runtime.py",
       "python/requirements.txt"
     ],
     "mac": {

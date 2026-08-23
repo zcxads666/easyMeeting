@@ -9,6 +9,7 @@ export default function Models() {
   const [status, setStatus] = useState({});
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const [runtime, setRuntime] = useState(null);
   const settings = useStore((s) => s.settings);
   const pollRef = useRef(null);
   const retryTimerRef = useRef(null);
@@ -19,6 +20,10 @@ export default function Models() {
     if (!silent) setLoading(true);
     try {
       const data = await api('/models');
+      const [capabilities, health] = await Promise.all([
+        api('/models/runtime/capabilities'), api('/models/runtime/health')
+      ]);
+      setRuntime({ capabilities, health });
       setModels(data.models || []);
       setDiskUsage(data.disk_usage || 0);
       setError('');
@@ -124,6 +129,8 @@ export default function Models() {
         </div>
       )}
 
+      {runtime && <RuntimePanel runtime={runtime} />}
+
       {loading ? (
         <p className="text-center text-gray-400 py-16">加载模型列表…</p>
       ) : models.length === 0 && !error ? (
@@ -147,6 +154,30 @@ export default function Models() {
       )}
     </div>
   );
+}
+
+function RuntimePanel({ runtime: { capabilities: c, health: h } }) {
+  const available = Object.entries(c.devices || {}).filter(([, d]) => d.available).map(([name]) => name).join(' / ');
+  return (
+    <div className="card p-5 mb-6">
+      <h2 className="font-semibold">运行环境</h2>
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-3 mt-3 text-sm">
+        <RuntimeItem label="Python" value={c.python || '未检测'} />
+        <RuntimeItem label="PyTorch" value={c.torch || '未安装'} />
+        <RuntimeItem label="Transformers" value={c.transformers || '未安装'} />
+        <RuntimeItem label="设备" value={available || '无'} />
+        <RuntimeItem label="依赖" value={h.dependencies?.ok ? '完整' : '不完整'} />
+        <RuntimeItem label="FFmpeg" value={h.ffmpeg?.available ? '可用' : '不可用'} />
+        <RuntimeItem label="模型 Runtime" value={h.modelRuntime?.available ? '可用' : '不可用'} />
+        <RuntimeItem label="平台" value={c.machine || c.platform || '未知'} />
+      </div>
+      {h.modelRuntime?.error && <p className="text-xs text-red-500 mt-3">{h.modelRuntime.error}</p>}
+    </div>
+  );
+}
+
+function RuntimeItem({ label, value }) {
+  return <div><p className="text-xs text-gray-400">{label}</p><p className="truncate" title={String(value)}>{value}</p></div>;
 }
 
 function ModelRow({ m, current, downloading, status, onDownload, onDelete, onSwitch }) {
