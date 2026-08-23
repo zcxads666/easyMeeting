@@ -35,6 +35,11 @@ test('alignment hash staleness 与依赖失效', () => {
   meeting.rawText = 'changed'; assert.equal(alignmentIsStale(meeting), true);
   const stale = markDependentArtifactsStale(meeting, 'transcript_changed');
   assert.equal(stale.alignment.stale, true); assert.equal(stale.timelineStatus, 'stale');
+  meeting.diarization = { stale: false, speakerAttribution: { quality: 'aligned', stale: false } };
+  const textOnly = markDependentArtifactsStale(meeting, 'transcript_changed');
+  assert.equal(textOnly.diarization.stale, false); assert.equal(textOnly.diarization.speakerAttribution.stale, true);
+  const audioChanged = markDependentArtifactsStale(meeting, 'audio_changed');
+  assert.equal(audioChanged.diarization.stale, true); assert.equal(audioChanged.diarization.speakerAttribution.stale, true);
 });
 
 test('SRT/VTT 格式、精确策略、粗略警告和 unknown 拒绝', () => {

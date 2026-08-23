@@ -105,6 +105,7 @@ export function alignmentIsStale(meeting) {
 export function markDependentArtifactsStale(meeting, reason) {
   const next = migrateMeeting(meeting);
   if (next.alignment) next.alignment = { ...next.alignment, stale: true, staleReason: reason };
+  if (reason === 'audio_changed' && next.diarization) next.diarization = { ...next.diarization, stale: true, staleReason: reason };
   if (next.diarization?.speakerAttribution) next.diarization.speakerAttribution = { ...next.diarization.speakerAttribution, stale: true, staleReason: reason };
   next.timelineStatus = next.alignment ? 'stale' : 'provisional';
   return next;

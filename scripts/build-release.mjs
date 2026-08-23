@@ -36,7 +36,9 @@ await cp(path.join(ROOT, 'web', 'dist'), path.join(PKG_DIR, 'web', 'dist'), { re
 await cp(path.join(ROOT, 'docs'), path.join(PKG_DIR, 'docs'), { recursive: true });
 // Python 推理服务源码（不含 venv，首次启动自动安装）
 await mkdir(path.join(PKG_DIR, 'python'), { recursive: true });
-for (const f of ['main.py', 'model_manager.py', 'runtime.py', 'transcribe_whisper.py', 'transcribe_qwen.py', 'requirements.txt']) {
+for (const f of ['main.py', 'model_manager.py', 'runtime.py', 'transcribe_whisper.py', 'transcribe_qwen.py',
+  'forced_aligner.py', 'diarization.py', 'streaming_vllm.py', 'requirements.txt',
+  'requirements-diarization.txt', 'requirements-streaming.txt']) {
   await copyFile(path.join(ROOT, 'python', f), path.join(PKG_DIR, 'python', f));
 }
 await mkdir(path.join(PKG_DIR, 'scripts'), { recursive: true });
@@ -74,7 +76,7 @@ if [ ! -d node_modules ]; then
 fi
 
 echo "[start] 启动服务，请访问 http://localhost:3000"
-echo "[start] 首次启动会自动安装 Python 推理环境（约 2-5 分钟），请耐心等待"
+echo "[start] 本地 AI Runtime 需要通过应用模型页显式安装；Cloud 功能可直接使用"
 node server/index.js
 `;
 await writeFile(path.join(PKG_DIR, 'start.sh'), sh, { mode: 0o755 });
@@ -94,7 +96,7 @@ if not exist node_modules (
 )
 
 echo [start] 启动服务，请访问 http://localhost:3000
-echo [start] 首次启动会自动安装 Python 推理环境，请耐心等待
+echo [start] 本地 AI Runtime 需要通过应用模型页显式安装；Cloud 功能可直接使用
 node server/index.js
 pause
 `;

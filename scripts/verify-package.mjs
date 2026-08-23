@@ -15,9 +15,12 @@ async function findArchives(directory) {
   await walk(directory); return archives;
 }
 const required = ['electron/main.js', 'electron/preload.cjs', 'server/index.js', 'web/dist/index.html',
-  'python/main.py', 'python/model_manager.py', 'python/requirements.txt', 'package.json'];
+  'python/main.py', 'python/model_manager.py', 'python/forced_aligner.py', 'python/diarization.py',
+  'python/streaming_vllm.py', 'python/requirements.txt', 'python/requirements-diarization.txt',
+  'python/requirements-streaming.txt', 'package.json'];
 const forbidden = [/^python\/\.venv(\/|$)/, /^models(\/|$)/, /^data(\/|$)/,
-  /^settings\.json$/, /^logs?(\/|$)/, /^secrets\.json$/];
+  /^settings\.json$/, /^logs?(\/|$)/, /^secrets\.json$/, /^(?:python\/)?\.cache(\/|$)/,
+  /^(?:meetings|uploads)(\/|$)/, /(?:pyannote|qwen|vllm).*(?:\.safetensors|\.bin)$/i];
 export async function verifyPackage(input) {
  const target = path.resolve(input); const archives = await findArchives(target);
  if (!archives.length) throw new Error(`[verify-package] app.asar not found under ${target}; package with electron-builder first`);

@@ -68,7 +68,8 @@ def load(model_id=DEFAULT_MODEL, device="auto"):
     except ImportError as exc:
         raise DiarizationRuntimeError("DIARIZATION_RUNTIME_NOT_INSTALLED", "未安装可选 pyannote.audio Runtime", model=model_id, device=resolved, cause=exc, feature="diarization") from exc
     except Exception as exc:
-        error = DiarizationRuntimeError("DIARIZATION_LOAD_FAILED", "说话人分离 pipeline 加载失败", model=model_id, device=resolved, cause=exc)
+        code = runtime.inference_error_code(exc, "DIARIZATION_LOAD_FAILED")
+        error = DiarizationRuntimeError(code, runtime.inference_error_message(exc, "说话人分离 pipeline 加载失败"), model=model_id, device=resolved, cause=exc)
         logger.exception("diarization load failed context=%s", error.context)
         raise error from exc
     _active = (key, pipeline)
@@ -101,6 +102,7 @@ def diarize_file(file_path, model_id=DEFAULT_MODEL, device="auto", num_speakers=
         return {"speakerTurns": regular, "exclusiveSpeakerTurns": exclusive, "model": model_id,
                 "device": key[1], "backend": key[2], "speakerCount": len({turn["speaker"] for turn in regular})}
     except Exception as exc:
-        error = DiarizationRuntimeError("DIARIZATION_FAILED", "说话人分离推理失败", model=model_id, device=key[1], cause=exc)
+        code = runtime.inference_error_code(exc, "DIARIZATION_FAILED")
+        error = DiarizationRuntimeError(code, runtime.inference_error_message(exc, "说话人分离推理失败"), model=model_id, device=key[1], cause=exc)
         logger.exception("diarization inference failed context=%s", error.context)
         raise error from exc

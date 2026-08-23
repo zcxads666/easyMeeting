@@ -35,4 +35,10 @@ class RuntimeDeviceTests(unittest.TestCase):
         self.assertEqual(runtime.select_dtype("cuda", FakeTorch(cuda=True, bf16=True)), "bfloat16")
         self.assertEqual(runtime.select_dtype("cuda", FakeTorch(cuda=True)), "float16")
 
+    def test_memory_failures_map_to_structured_oom_without_device_fallback(self):
+        error = RuntimeError("CUDA out of memory. Tried to allocate 2 GiB")
+        self.assertEqual(runtime.inference_error_code(error), "MODEL_OUT_OF_MEMORY")
+        self.assertIn("CPU", runtime.inference_error_message(error, "failed"))
+        self.assertEqual(runtime.inference_error_code(RuntimeError("bad input"), "BAD_INPUT"), "BAD_INPUT")
+
 if __name__ == "__main__": unittest.main()

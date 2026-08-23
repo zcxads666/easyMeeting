@@ -34,7 +34,7 @@ export default function Meeting() {
       workletRef.current?.disconnect();
       mediaRef.current?.getTracks().forEach((t) => t.stop());
       audioCtxRef.current?.close();
-    } catch {}
+    } catch (error) { console.warn('[meeting] media cleanup failed', error); }
     workletRef.current = null;
     mediaRef.current = null;
     audioCtxRef.current = null;
@@ -273,7 +273,7 @@ export default function Meeting() {
           value={meeting.title}
           onChange={(e) => setMeeting((m) => ({ ...m, title: e.target.value }))}
           onBlur={(e) => {
-            api(`/meetings/${id}`, { method: 'PATCH', body: { title: e.target.value } }).catch(() => {});
+            api(`/meetings/${id}`, { method: 'PATCH', body: { title: e.target.value } }).catch((error) => setError(error.message));
           }}
         />
       </div>

@@ -63,7 +63,8 @@ def load(model_id, **kwargs):
             _model = Qwen3ASRModel.LLM(model=local, gpu_memory_utilization=float(kwargs.get("gpu_memory_utilization", .8)), max_new_tokens=32)
         except Exception as exc:
             logger.exception("vLLM streaming model load failed type=%s", type(exc).__name__)
-            raise StreamingRuntimeError("TRUE_STREAMING_LOAD_FAILED", "vLLM streaming 模型加载失败", technical=f"{type(exc).__name__}: {exc}") from exc
+            code = runtime.inference_error_code(exc, "TRUE_STREAMING_LOAD_FAILED")
+            raise StreamingRuntimeError(code, runtime.inference_error_message(exc, "vLLM streaming 模型加载失败"), technical=f"{type(exc).__name__}: {exc}") from exc
         _model_key = key
         return _model
 
@@ -103,3 +104,7 @@ def release():
     with _sessions_guard:
         if _sessions: raise StreamingRuntimeError("MODEL_BUSY", "仍有 true-streaming 会话，不能释放模型")
     _model = None; _model_key = None
+
+
+def active_sessions():
+    with _sessions_guard: return len(_sessions)

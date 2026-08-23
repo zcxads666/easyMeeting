@@ -14,8 +14,9 @@ async function callPython(path, body, { signal } = {}) {
   const json = await res.json().catch(() => ({}));
   if (!res.ok) {
     const detail = json.detail || json.error || res.statusText;
-    throw Object.assign(new Error(`本地 ASR 失败: ${typeof detail === 'string' ? detail : JSON.stringify(detail)}`),
-      { code: 'LOCAL_ASR_FAILED', detail });
+    const message = typeof detail === 'string' ? detail : detail.message || JSON.stringify(detail);
+    throw Object.assign(new Error(`本地 ASR 失败: ${message}`),
+      { code: detail?.code || 'LOCAL_ASR_FAILED', detail });
   }
   return json;
 }

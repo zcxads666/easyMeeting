@@ -100,7 +100,8 @@ def load(model_id=DEFAULT_MODEL, device="auto"):
         processor = AutoProcessor.from_pretrained(str(local), local_files_only=True)
         model = AutoModelForTokenClassification.from_pretrained(str(local), local_files_only=True, dtype=dtype).to(device).eval()
     except Exception as exc:
-        error = AlignmentRuntimeError("ALIGNER_LOAD_FAILED", "Forced Aligner 模型加载失败", model=model_id, device=device, cause=exc)
+        code = runtime.inference_error_code(exc, "ALIGNER_LOAD_FAILED")
+        error = AlignmentRuntimeError(code, runtime.inference_error_message(exc, "Forced Aligner 模型加载失败"), model=model_id, device=device, cause=exc)
         logger.exception("aligner load failed context=%s", error.context)
         raise error from exc
     _active = (key, (processor, model))
@@ -170,6 +171,7 @@ def align_pcm(pcm_bytes: bytes, text: str, language: str, model_id=DEFAULT_MODEL
         raise
     except Exception as exc:
         resolved = key[1] if "key" in locals() else device
-        error = AlignmentRuntimeError("ALIGNMENT_FAILED", "Forced Alignment 推理失败", model=model_id, device=resolved, cause=exc)
+        code = runtime.inference_error_code(exc, "ALIGNMENT_FAILED")
+        error = AlignmentRuntimeError(code, runtime.inference_error_message(exc, "Forced Alignment 推理失败"), model=model_id, device=resolved, cause=exc)
         logger.exception("alignment failed context=%s", error.context)
         raise error from exc

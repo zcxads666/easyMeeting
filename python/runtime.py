@@ -7,6 +7,19 @@ import sys
 
 SUPPORTED_DEVICES = ("auto", "cpu", "cuda", "mps")
 
+_OOM_MARKERS = ("out of memory", "cuda error: out of memory", "mps backend out of memory",
+                "cannot allocate memory", "defaultcpuallocator", "allocation failed")
+
+def inference_error_code(exc, default="INFERENCE_FAILED"):
+    """Map backend allocation failures without changing device or hiding the cause."""
+    text = f"{type(exc).__name__}: {exc}".lower()
+    return "MODEL_OUT_OF_MEMORY" if any(marker in text for marker in _OOM_MARKERS) else default
+
+def inference_error_message(exc, fallback):
+    if inference_error_code(exc) == "MODEL_OUT_OF_MEMORY":
+        return "模型推理内存不足；请使用更小模型、释放其他模型或显式选择 CPU"
+    return fallback
+
 def _torch():
     try:
         import torch

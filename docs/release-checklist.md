@@ -12,4 +12,14 @@
 - [ ] Windows/macOS/Linux 安装包人工启动检查
 - [ ] Cloud-only 模式在 Runtime 缺失时仍可启动
 - [ ] Runtime install/repair、模型下载取消/重试和诊断导出人工检查
+- [ ] Meeting v1/v2 → v3 与 settings v1/v2/v3 → v4 migration fixtures 通过
+- [ ] Forced Alignment CPU 实机验证
+- [ ] Forced Alignment CUDA 实机验证
+- [ ] Diarization CPU 实机验证
+- [ ] Diarization CUDA 实机验证
+- [ ] Chunked realtime 录音、stop finalize 和后处理验证
+- [ ] vLLM true streaming（Linux + CUDA）实机验证
+- [ ] Qwen CPU / CUDA / MPS 分别实机验证
 - [ ] 未提交本地会议、音频、模型或 secret
+
+未实际验证的平台或硬件必须保持 unchecked，不能用 mock/CI 结果替代实机勾选。

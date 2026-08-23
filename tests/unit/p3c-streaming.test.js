@@ -6,7 +6,7 @@ import path from 'node:path';
 import { resolveRealtimeCapability } from '../../server/services/asr/capabilities.js';
 import { localVllmRealtime } from '../../server/services/asr/localVllm.js';
 import { RecordingWriter } from '../../server/services/audio/recording.js';
-import { enqueuePostProcessing } from '../../server/socket/realtime.js';
+import { enqueuePostProcessing } from '../../server/services/post-processing.js';
 
 const local = (mode = 'auto', engine = 'qwen') => ({ realtime: { mode }, asr: { provider: 'local', local: { engine, model: 'Qwen/test' } } });
 
@@ -62,4 +62,3 @@ test('post-processing 保留已成功步骤且后一步失败不回滚', async (
   assert.equal(result.steps.alignment.status, 'completed'); assert.equal(result.steps.diarization.status, 'failed');
   assert.equal(result.steps.diarization.error.code, 'HF_AUTH_REQUIRED');
 });
-

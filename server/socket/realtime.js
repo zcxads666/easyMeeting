@@ -3,9 +3,7 @@ import { createRealtimeStream as defaultCreateStream } from '../services/asr/ind
 import { normalizeRealtimeFinal, normalizeRealtimeMetrics } from '../services/asr/contract.js';
 import { resolveRealtimeCapability } from '../services/asr/capabilities.js';
 import { RecordingWriter, cleanupPartialRecordings } from '../services/audio/recording.js';
-import { taskManager } from '../services/queue.js';
-import { runAlignment } from '../services/alignment.js';
-import { runDiarization } from '../services/diarization.js';
+import { enqueuePostProcessing } from '../services/post-processing.js';
 import { MEETING_SCHEMA_VERSION } from '../services/timeline.js';
 
 const sessions = new Map();
@@ -161,25 +159,6 @@ async function persistAndClose(meetingId) {
     sessions.delete(meetingId);
     if (!session.recordingFailed && recordingResult.path) enqueuePostProcessing(meetingId, session.settings);
   }
-}
-
-export function enqueuePostProcessing(meetingId, settings, dependencies = {}) {
-  if (!settings.postProcessing?.autoAlign && !settings.postProcessing?.autoDiarize) return null;
-  const align = dependencies.runAlignment || runAlignment; const diarize = dependencies.runDiarization || runDiarization;
-  const manager = dependencies.taskManager || taskManager;
-  return manager.create({ type: 'post_processing', lane: 'local', metadata: { meetingId }, run: async (context) => {
-    const steps = {};
-    if (settings.postProcessing.autoAlign) {
-      try { steps.alignment = { status: 'completed', result: await align(meetingId,
-        { ...settings.alignment, source: 'auto' }, context) }; }
-      catch (error) { steps.alignment = { status: 'failed', error: { code: error.code || 'ALIGNMENT_FAILED', message: error.message } }; }
-    }
-    if (settings.postProcessing.autoDiarize && !context.isCancellationRequested()) {
-      try { steps.diarization = { status: 'completed', result: await diarize(meetingId, settings.diarization, context) }; }
-      catch (error) { steps.diarization = { status: 'failed', error: { code: error.code || 'DIARIZATION_FAILED', message: error.message } }; }
-    }
-    return { meetingId, steps };
-  }});
 }
 
 function scheduleSave(session, meeting) {

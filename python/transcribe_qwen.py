@@ -9,9 +9,10 @@ logger = logging.getLogger("meeting.qwen")
 _active = None
 
 class QwenRuntimeError(RuntimeError):
-    def __init__(self, message, *, model, device, backend="transformers", cause=None):
+    def __init__(self, message, *, model, device, backend="transformers", cause=None, code="QWEN_RUNTIME_FAILED"):
         super().__init__(message)
-        self.context = {"type": type(cause).__name__ if cause else type(self).__name__,
+        self.code = code
+        self.context = {"code": code, "type": type(cause).__name__ if cause else type(self).__name__,
                         "technicalMessage": str(cause) if cause else message, "model": model,
                         "device": device, "backend": backend}
 
@@ -45,7 +46,9 @@ def _load(model_id, requested_device="auto"):
             str(local), local_files_only=True, dtype=dtype
         ).to(device).eval()
     except Exception as exc:
-        error = QwenRuntimeError("Qwen3-ASR 模型加载失败", model=model_id, device=device, cause=exc)
+        code = runtime.inference_error_code(exc, "QWEN_LOAD_FAILED")
+        error = QwenRuntimeError(runtime.inference_error_message(exc, "Qwen3-ASR 模型加载失败"),
+                                 model=model_id, device=device, cause=exc, code=code)
         logger.exception("Qwen load failed context=%s", error.context)
         raise error from exc
     _active = (key, (processor, model))
@@ -67,7 +70,9 @@ def transcribe_pcm(pcm_bytes, model_id, language=None, device="auto"):
         raise
     except Exception as exc:
         resolved = key[1] if "key" in locals() else device
-        error = QwenRuntimeError("Qwen3-ASR 推理失败", model=model_id, device=resolved, cause=exc)
+        code = runtime.inference_error_code(exc, "QWEN_INFERENCE_FAILED")
+        error = QwenRuntimeError(runtime.inference_error_message(exc, "Qwen3-ASR 推理失败"),
+                                 model=model_id, device=resolved, cause=exc, code=code)
         logger.exception("Qwen inference failed context=%s", error.context)
         raise error from exc
     duration = len(samples) / 16000

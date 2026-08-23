@@ -260,6 +260,12 @@ function RuntimePanel({ runtime: r, busy, onAction, onInstallFeature }) {
         <button className="btn-secondary !py-1.5 text-xs" disabled={busy || r.optionalFeatures.diarization?.available} onClick={() => onInstallFeature('diarization')}>
           说话人分离 Runtime：{r.optionalFeatures.diarization?.available ? '已安装' : '安装'}
         </button>
+        <button className="btn-secondary !py-1.5 text-xs" disabled={busy || r.optionalFeatures['alignment-ja']?.available} onClick={() => onInstallFeature('alignment-ja')}>
+          日语对齐：{r.optionalFeatures['alignment-ja']?.available ? '已安装' : '安装依赖'}
+        </button>
+        <button className="btn-secondary !py-1.5 text-xs" disabled={busy || r.optionalFeatures['alignment-ko']?.available} onClick={() => onInstallFeature('alignment-ko')}>
+          韩语对齐：{r.optionalFeatures['alignment-ko']?.available ? '已安装' : '安装依赖'}
+        </button>
         <button className="btn-secondary !py-1.5 text-xs" disabled={busy || r.streaming?.available || !r.streaming?.supported} onClick={() => onInstallFeature('qwen-streaming-vllm')}>
           True Streaming Runtime：{r.streaming?.available ? '可用' : r.streaming?.supported ? '安装' : '当前平台不支持'}
         </button>

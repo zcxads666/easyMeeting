@@ -122,6 +122,19 @@ test('实时 PCM 独立持久化为 WAV，stop 在文件和 meeting 保存后才
   await api('DELETE', `/api/meetings/${m.id}`);
 });
 
+test('ASR fatal 后录音继续并安全保存，不因转写故障丢音频', async () => {
+  const { data: m } = await api('POST', '/api/meetings', { title: 'asr-crash-recording' });
+  const socket = await connectSocket(); socket.emit('rt:start', { meetingId: m.id }); await sleep(50);
+  lastStream.emit('error', { code: 'DAEMON_DOWN', message: 'python crashed', fatal: true });
+  socket.emit('rt:audio', { meetingId: m.id, data: Buffer.alloc(3200, 7).toString('base64') });
+  const stopped = new Promise((resolve) => socket.on('rt:status', ({ state }) => state === 'stopped' && resolve()));
+  socket.emit('rt:stop', { meetingId: m.id }); await stopped; socket.close();
+  const { data: loaded } = await api('GET', `/api/meetings/${m.id}`);
+  assert.equal(loaded.status, 'recorded_with_asr_error'); assert.match(loaded.audioRef, /\.wav$/);
+  assert.equal((await fsp.stat(loaded.audioRef)).size, 44 + 3200);
+  await api('DELETE', `/api/meetings/${m.id}`);
+});
+
 test('local/mimo start().catch 不炸', async () => {
   const local = localRealtime({ asr: { local: { engine: 'whisper', model: 'whisper-tiny' } } });
   await local.start().catch((e) => { throw e; });

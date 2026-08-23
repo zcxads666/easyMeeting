@@ -1,6 +1,8 @@
 import json
 import base64
 import os
+import functools
+import threading
 from pathlib import Path
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel, Field
@@ -15,6 +17,32 @@ import streaming_vllm
 import runtime
 
 app = FastAPI(title="Meeting Local Inference")
+_inference_lock = threading.RLock()
+
+
+def _prepare_workload(kind, request=None):
+    """Keep only the selected heavy cache and serialize local inference families."""
+    if not kind.startswith("streaming") and streaming_vllm.active_sessions():
+        raise HTTPException(status_code=409, detail={"code": "MODEL_BUSY", "message": "true-streaming 会话正在使用本地模型"})
+    selected = kind
+    if kind == "transcribe": selected = getattr(request, "engine", None)
+    if kind == "benchmark": selected = "whisper" if getattr(request, "id", "").startswith("whisper-") else "qwen"
+    if selected != "whisper": transcribe_whisper.release()
+    if selected != "qwen": transcribe_qwen.release()
+    if selected != "alignment": forced_aligner.release()
+    if selected != "diarization": diarization.release()
+
+
+def serialized_inference(kind):
+    def decorate(function):
+        @functools.wraps(function)
+        def wrapped(*args, **kwargs):
+            request = args[0] if args else next(iter(kwargs.values()), None)
+            with _inference_lock:
+                _prepare_workload(kind, request)
+                return function(*args, **kwargs)
+        return wrapped
+    return decorate
 
 
 class TranscribeReq(BaseModel):
@@ -144,6 +172,7 @@ async def delete_model(model_id: str):
 
 
 @app.post("/models/benchmark")
+@serialized_inference("benchmark")
 def benchmark(req: BenchmarkReq):
     pcm = _read_uploads_file(req.file)
     try:
@@ -159,6 +188,7 @@ def benchmark(req: BenchmarkReq):
 
 
 @app.post("/align")
+@serialized_inference("alignment")
 def align(req: AlignmentReq):
     pcm = _read_uploads_file(req.file)
     try:
@@ -175,6 +205,7 @@ def align(req: AlignmentReq):
 
 
 @app.post("/diarize")
+@serialized_inference("diarization")
 def diarize(req: DiarizationReq):
     _read_uploads_file(req.file)  # path boundary and existence check; pyannote streams the WAV itself.
     try:
@@ -196,18 +227,21 @@ def _stream_error(exc):
 
 
 @app.post("/streaming/start")
+@serialized_inference("streaming")
 def streaming_start(req: StreamStartReq):
     try: return streaming_vllm.start(req.model)
     except streaming_vllm.StreamingRuntimeError as exc: raise _stream_error(exc)
 
 
 @app.post("/streaming/send")
+@serialized_inference("streaming-send")
 def streaming_send(req: StreamAudioReq):
     try: return streaming_vllm.send(req.session_id, base64.b64decode(req.pcm))
     except streaming_vllm.StreamingRuntimeError as exc: raise _stream_error(exc)
 
 
 @app.post("/streaming/stop")
+@serialized_inference("streaming-send")
 def streaming_stop(req: StreamStopReq):
     try: return streaming_vllm.stop(req.session_id)
     except streaming_vllm.StreamingRuntimeError as exc: raise _stream_error(exc)
@@ -229,6 +263,7 @@ def _read_uploads_file(file_path: str) -> bytes:
 
 
 @app.post("/transcribe")
+@serialized_inference("transcribe")
 def transcribe(req: TranscribeReq):
     if req.file:
         pcm = _read_uploads_file(req.file)
@@ -249,7 +284,10 @@ def transcribe(req: TranscribeReq):
     except transcribe_qwen.QwenRuntimeError as e:
         raise HTTPException(status_code=500, detail={"message": str(e), **e.context})
     except Exception as e:
-        raise HTTPException(status_code=500, detail={"message": str(e), "type": type(e).__name__})
+        code = runtime.inference_error_code(e, "LOCAL_INFERENCE_FAILED")
+        raise HTTPException(status_code=500, detail={"code": code,
+            "message": runtime.inference_error_message(e, "本地模型推理失败"),
+            "technical": f"{type(e).__name__}: {e}", "type": type(e).__name__})
 
 
 if __name__ == "__main__":

@@ -23,7 +23,8 @@ test('Python test runner 明确选择项目 venv 的跨平台路径', async () =
 test('package verifier 接受完整 asar 并拒绝用户 settings', async () => {
   const temp = await fsp.mkdtemp(path.join(os.tmpdir(), 'meeting-asar-')); const source = path.join(temp, 'source');
   const required = ['electron/main.js', 'electron/preload.cjs', 'server/index.js', 'web/dist/index.html',
-    'python/main.py', 'python/model_manager.py', 'python/requirements.txt', 'package.json'];
+    'python/main.py', 'python/model_manager.py', 'python/forced_aligner.py', 'python/diarization.py', 'python/streaming_vllm.py',
+    'python/requirements.txt', 'python/requirements-diarization.txt', 'python/requirements-streaming.txt', 'package.json'];
   for (const file of required) { const target = path.join(source, file); await fsp.mkdir(path.dirname(target), { recursive: true }); await fsp.writeFile(target, '{}'); }
   const out = path.join(temp, 'artifact'); await fsp.mkdir(out); await createPackage(source, path.join(out, 'app.asar'));
   const good = await verifyPackage(out); assert.equal(good.length, 1);

@@ -17,7 +17,7 @@ export const MODEL_CATALOG = [
     estimatedSizeBytes: Math.round(1.8 * GB), supportedDevices: ['cpu', 'cuda', 'mps'] },
   { id: 'pyannote/speaker-diarization-community-1', label: 'Speaker Diarization Community-1', role: 'diarization',
     engine: 'pyannote', kind: 'pyannote', backend: 'pyannote.audio', source: 'huggingface', gated: true, bundle: true,
-    estimatedSizeBytes: Math.round(3 * GB), supportedDevices: ['cpu', 'cuda'] }
+    estimatedSizeBytes: Math.round(.05 * GB), supportedDevices: ['cpu', 'cuda'] }
 ];
 
 function directoryFor(model) {

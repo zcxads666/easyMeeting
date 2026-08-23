@@ -17,6 +17,7 @@ import { runAlignment } from '../services/alignment.js';
 import { buildSrt, buildVtt, SubtitleError } from '../services/subtitles.js';
 import { MEETING_SCHEMA_VERSION } from '../services/timeline.js';
 import { runDiarization, renameSpeakers } from '../services/diarization.js';
+import { enqueuePostProcessing } from '../services/post-processing.js';
 
 const router = Router();
 
@@ -120,8 +121,7 @@ router.patch('/:id', async (req, res) => {
   const m = await getMeeting(req.params.id);
   if (!m) return res.status(404).json({ error: 'not found' });
   const { id: _ignored, ...rest } = req.body || {};
-  const next = { ...m, ...rest, id: m.id };
-  const saved = await saveMeeting(next);
+  const saved = await updateMeeting(m.id, rest);
   res.json(saved);
 });
 
@@ -231,6 +231,7 @@ router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
         status: 'transcribed'
       });
       if (!saved) throw Object.assign(new Error('会议已删除，转写结果未保存'), { code: 'MEETING_DELETED' });
+      enqueuePostProcessing(meeting.id, settings);
       return { meetingId: meeting.id, asr: result };
     } catch (err) {
       if (!context.isCancellationRequested()) await updateMeeting(meeting.id, { status: 'error' });

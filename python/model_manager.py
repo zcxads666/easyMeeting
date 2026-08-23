@@ -24,7 +24,7 @@ REFERENCE_SIZES_GB = {
     "whisper-medium": 1.5, "whisper-large-v3": 3.0,
     "Qwen/Qwen3-ASR-0.6B-hf": 1.6, "Qwen/Qwen3-ASR-1.7B-hf": 3.8,
     "Qwen/Qwen3-ForcedAligner-0.6B-hf": 1.8,
-    "pyannote/speaker-diarization-community-1": 3.0,
+    "pyannote/speaker-diarization-community-1": 0.05,
 }
 MODEL_CATALOG = [
     *[{"id": f"whisper-{s}", "label": f"Whisper {s}", "role": "asr", "engine": "whisper", "backend": "faster-whisper",

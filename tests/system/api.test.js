@@ -195,7 +195,20 @@ test('P2A: settings validation 与脱敏 diagnostics', async () => {
   const unknown = await api('PATCH', '/api/settings', { unexpected: true }); assert.equal(unknown.res.status, 400);
   const { res, data } = await api('GET', '/api/diagnostics'); assert.equal(res.status, 200);
   assert.ok(data.app.node); assert.ok(data.runtime); assert.ok(data.asr); assert.ok(data.security);
+  assert.ok(data.alignment); assert.ok(data.diarization); assert.ok(data.streaming); assert.ok(data.postProcessing);
   const serialized = JSON.stringify(data); assert.doesNotMatch(serialized, /apiKey|Authorization|transcript|audioRef/);
+});
+
+test('P3: API transcript/audio 更新遵守 stale dependency graph', async () => {
+  const { data: m } = await api('POST', '/api/meetings', { title: 'stale graph' });
+  await api('PATCH', `/api/meetings/${m.id}`, { rawText: 'first', alignment: { stale: false, textSource: 'raw', textHash: 'old' },
+    diarization: { stale: false, speakerAttribution: { quality: 'aligned', stale: false } }, timelineStatus: 'aligned' });
+  const { data: textChanged } = await api('PATCH', `/api/meetings/${m.id}`, { rawText: 'second' });
+  assert.equal(textChanged.alignment.stale, true); assert.equal(textChanged.diarization.stale, false);
+  assert.equal(textChanged.diarization.speakerAttribution.stale, true); assert.equal(textChanged.timelineStatus, 'stale');
+  const { data: audioChanged } = await api('PATCH', `/api/meetings/${m.id}`, { audioRef: path.join(TEST_DATA_DIR, 'uploads', 'other.wav') });
+  assert.equal(audioChanged.diarization.stale, true); assert.equal(audioChanged.diarization.staleReason, 'audio_changed');
+  await api('DELETE', `/api/meetings/${m.id}`);
 });
 
 test('验收3: 模型代理路由（不下载真实模型）', async () => {
