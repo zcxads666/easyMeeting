@@ -12,17 +12,25 @@ const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
 
 function runBuilder(outputDir) {
   return new Promise((resolve, reject) => {
+    let outputTail = '';
     const child = spawn(command, [
       'electron-builder',
       '--publish',
       'never',
       ...args,
       `--config.directories.output=${outputDir}`
-    ], { cwd: root, stdio: 'inherit' });
+    ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    const forward = (chunk, target) => {
+      const text = chunk.toString();
+      target.write(text);
+      outputTail = `${outputTail}${text}`.slice(-16000);
+    };
+    child.stdout.on('data', (chunk) => forward(chunk, process.stdout));
+    child.stderr.on('data', (chunk) => forward(chunk, process.stderr));
     child.once('error', reject);
     child.once('exit', (code) => code === 0
       ? resolve()
-      : reject(new Error(`electron-builder exited with code ${code}`)));
+      : reject(new Error(`electron-builder exited with code ${code}\n${outputTail}`)));
   });
 }
 
@@ -74,6 +82,17 @@ try {
     await copyArtifacts(localOutput);
     await verifyMacArtifacts(releaseDir);
   }
+} catch (error) {
+  const message = error instanceof Error ? error.stack || error.message : String(error);
+  if (process.env.GITHUB_ACTIONS === 'true') {
+    const annotation = message
+      .replaceAll('%', '%25')
+      .replaceAll('\r', '%0D')
+      .replaceAll('\n', '%0A')
+      .slice(-9000);
+    console.error(`::error title=Desktop packaging failed::${annotation}`);
+  }
+  throw error;
 } finally {
   if (isMac) await rm(localOutput, { recursive: true, force: true });
 }
