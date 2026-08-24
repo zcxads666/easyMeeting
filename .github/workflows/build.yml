@@ -111,6 +111,11 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      - name: Ensure Electron distribution
+        run: >-
+          node node_modules/electron/install.js &&
+          node -e "const fs=require('node:fs'); if(!fs.existsSync('node_modules/electron/dist')) throw new Error('Electron distribution is missing')"
+
       - name: Build offline Python Runtime prerequisites
         run: npm run setup:runtime-build
 
@@ -216,6 +221,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+
+      - name: Ensure Electron distribution
+        run: >-
+          node node_modules/electron/install.js &&
+          node -e "const fs=require('node:fs'); if(!fs.existsSync('node_modules/electron/dist')) throw new Error('Electron distribution is missing')"
 
       - name: Build offline Python Runtime prerequisites
         run: npm run setup:runtime-build
