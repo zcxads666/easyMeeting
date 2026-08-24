@@ -66,7 +66,9 @@ jobs:
   package:
     name: Package ${{ matrix.name }}
     needs: quality
-    if: github.event_name != 'pull_request'
+    # Pull requests must exercise the macOS installer path; pushes/tags keep
+    # the full Windows/macOS/Linux matrix for release coverage.
+    if: github.event_name != 'pull_request' || matrix.name == 'macOS'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     env:
