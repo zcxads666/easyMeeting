@@ -289,6 +289,7 @@ function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, on
   const progress = status?.progress ?? m.progress;
   const speed = status?.speedBytesPerSecond ?? m.speedBytesPerSecond;
   const eta = status?.etaSeconds ?? m.etaSeconds;
+  const sourceLabel = (status?.source || m.source) === 'modelscope' ? '国内模型仓库' : '备用模型仓库';
 
   return (
     <div className="card p-5 flex items-center gap-4">
@@ -315,7 +316,7 @@ function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, on
               }} />
             </div>}
             <p className="text-xs text-gray-400 mt-1">
-              {downloadedBytes ? `已下载 ${formatBytes(downloadedBytes)}` : '正在连接模型仓库…'}
+              {downloadedBytes ? `已下载 ${formatBytes(downloadedBytes)}` : `${status?.phase === 'connecting' ? '正在连接' : '准备访问'}${sourceLabel}…`}
               {totalBytes ? ` / ${formatBytes(totalBytes)}` : ''}{speed ? ` · ${formatBytes(speed)}/s` : ''}{eta ? ` · 约 ${formatDuration(eta)}` : ''}
             </p>
           </div>

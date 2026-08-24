@@ -57,7 +57,7 @@ Transformers/faster-whisper 本地 realtime 是带静音切分、overlap 和去�
 
 Qwen3-ASR 可以在 CPU 上运行，GPU 不是必需条件。Whisper 的 faster-whisper/CTranslate2 backend 不支持 MPS；Apple 设备可选择 Whisper CPU 或 Qwen MPS。
 
-模型先下载到 `.downloads` 临时目录，通过关键文件验证后才写入 manifest 并转为 ready。旧版本已下载的合法模型会原地验证并生成 manifest，不会要求重新下载。中断下载可“继续/重试”，其含义是复用 Hugging Face/ModelScope backend 的缓存能力，不是自研 HTTP Range downloader。
+模型默认优先从 ModelScope 下载（适合中国大陆网络），失败后自动切换 Hugging Face；也可用 `MEETING_MODEL_SOURCE=huggingface` 强制首选 Hugging Face。模型先下载到 `.downloads` 临时目录，通过关键文件和 JSON 配置校验后才写入 manifest 并转为 ready。中断下载可“继续/重试”；如果最终模型或临时目录已损坏，重试会先清理对应的坏缓存，避免反复复用缺失 `config.json` 的目录。
 
 ## Precise Timeline and Speakers
 
@@ -69,7 +69,7 @@ Speaker Diarization 是可选、本地、离线 post-processing，不参与实�
 
 ## Local Runtime
 
-官方桌面安装包内置基础 Python Runtime、PyTorch、faster-whisper、Transformers、FFmpeg 和 FFprobe，用户无需另装 Python/pip/FFmpeg；模型权重仍按需下载。Runtime 不会在应用普通启动时拉起，只有使用本地模型功能时才启动。Diarization、日/韩对齐依赖和 Linux CUDA vLLM 不进入标准包，后续由增强版安装包提供。详见 [Runtime 文档](docs/runtime.md)。
+官方桌面安装包内置基础 Python Runtime、PyTorch、faster-whisper、Transformers、ModelScope、Hugging Face Hub、FFmpeg 和 FFprobe，用户无需另装 Python/pip/FFmpeg；模型权重仍按需下载。Runtime 不会在应用普通启动时拉起，只有使用本地模型功能时才启动。Diarization、日/韩对齐依赖和 Linux CUDA vLLM 不进入标准包，后续由增强版安装包提供。详见 [Runtime 文档](docs/runtime.md)。
 
 支持并测试 Python 3.12；开发目标范围为 Python 3.10–3.12。该范围与当前 CI、Transformers 5.x、PyTorch 和 faster-whisper 依赖组合保持保守一致。
 
@@ -116,7 +116,7 @@ npm run verify:package
 npm run test:startup -- release/desktop
 ```
 
-`npm run desktop:dist` 会先运行 `npm run build:runtime`，因此构建机需先执行 `npm run setup:runtime-build`。产物位于 `release/desktop/`。package verification 会检查 Electron、server、Web build、离线 Runtime、FFmpeg/FFprobe 和对应许可证存在，并拒绝 `.venv`、模型、用户数据、settings、日志及测试 credential。
+`npm run desktop:dist` 会先运行 `npm run build:runtime`，因此构建机需先执行 `npm run setup:runtime-build`。macOS 会先把 DMG/ZIP 写到本地临时卷，校验通过后再复制到 `release/desktop/`，避免在 ExFAT 外置盘上直接生成损坏的 DMG。package verification 会检查 Electron、server、Web build、离线 Runtime、FFmpeg/FFprobe 和对应许可证存在，并拒绝 `.venv`、模型、用户数据、settings、日志及测试 credential。
 桌面端会先显示轻量启动页，主窗口完成首帧后再切换；启动日志包含各阶段毫秒耗时。正式 tag 发布要求配置
 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`、`MACOS_CSC_LINK` / `MACOS_CSC_KEY_PASSWORD`，以及 macOS 公证所需的
 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` GitHub Actions secrets；缺失时 tag 构建会失败，避免发布未签名安装包。
@@ -130,11 +130,11 @@ macOS 冒烟测试通过 Launch Services 打开 `.app`，避免在受限终端�
 
 - **Runtime 未安装/损坏**：官方桌面包已内置基础 Runtime；在模型页选择“诊断/修复”，失败后导出诊断包。
 - **FFmpeg missing**：官方桌面包已内置 FFmpeg/FFprobe；若诊断仍显示缺失，导出诊断包确认应用包是否完整。
-- **模型 broken**：先“验证”；关键文件不完整时选择“继续/重试”，应用不会自动删除旧文件。
+- **模型 broken**：先“验证”；关键文件不完整时选择“继续/重试”，应用会清理对应的损坏缓存后重新下载，不会把坏目录标记为 ready。
 - **磁盘空间不足**：清理模型目录所在磁盘；下载前会按预估模型大小加安全余量检查。
 - **CUDA unavailable**：确认 PyTorch/CTranslate2 和驱动组合支持当前 CUDA；显式选择 CUDA 不会静默回退 CPU。
 - **MPS**：仅 Qwen Transformers backend 支持；Whisper 请使用 CPU。
-- **下载网络中断**：点击“继续/重试”，backend 会尽可能复用缓存；无法取得仓库 total 时 UI 不显示虚假百分比。
+- **下载网络中断**：默认先走 ModelScope，失败后走 Hugging Face；点击“继续/重试”会按缓存状态续传或清理损坏缓存。连接和下载有超时，UI 会显示当前源，不会无限停留在“正在连接模型仓库”。
 - **safeStorage unavailable**：检查系统 keyring/桌面会话；桌面端不会静默降级为明文 credential。
 - **精确对齐未运行/已过期**：安装 Aligner 模型并重新运行；没有精确或 Provider 原生时间时不会伪造字幕。
 - **日语/韩语对齐缺依赖**：安装模型页提示的 `alignment-ja` / `alignment-ko` 可选 Runtime feature。

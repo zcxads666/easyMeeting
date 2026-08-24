@@ -13,7 +13,9 @@ class ModelCatalogTests(unittest.TestCase):
         qwen = [item for item in model_manager.MODEL_CATALOG if item["engine"] == "qwen"]
         self.assertEqual({item["id"] for item in qwen}, {
             "Qwen/Qwen3-ASR-0.6B-hf", "Qwen/Qwen3-ASR-1.7B-hf"})
-        self.assertTrue(all(item["source"] == "huggingface" for item in qwen))
+        self.assertTrue(all(item["source"] == model_manager.DEFAULT_SOURCE for item in qwen))
+        self.assertEqual(model_manager.source_candidates("Qwen/Qwen3-ASR-0.6B-hf"),
+                         [model_manager.DEFAULT_SOURCE, "huggingface" if model_manager.DEFAULT_SOURCE == "modelscope" else "modelscope"])
         self.assertTrue(all("cpu" in item["supportedDevices"] for item in qwen))
 
     def test_invalid_model_fails(self):

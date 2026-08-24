@@ -1,0 +1,79 @@
+import { access, cp, mkdir, mkdtemp, readdir, rm } from 'node:fs/promises';
+import { execFileSync, spawn } from 'node:child_process';
+import os from 'node:os';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+
+const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
+const releaseDir = path.join(root, 'release', 'desktop');
+const isMac = process.platform === 'darwin';
+const args = process.argv.slice(2);
+const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+
+function runBuilder(outputDir) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(command, [
+      'electron-builder',
+      '--publish',
+      'never',
+      ...args,
+      `--config.directories.output=${outputDir}`
+    ], { cwd: root, stdio: 'inherit' });
+    child.once('error', reject);
+    child.once('exit', (code) => code === 0
+      ? resolve()
+      : reject(new Error(`electron-builder exited with code ${code}`)));
+  });
+}
+
+async function verifyMacArtifacts(outputDir) {
+  const entries = await readdir(outputDir);
+  const dmgs = entries.filter((entry) => entry.endsWith('.dmg'));
+  const zips = entries.filter((entry) => entry.endsWith('.zip'));
+  if (!dmgs.length || !zips.length) {
+    throw new Error(`[desktop-build] expected DMG and ZIP in ${outputDir}`);
+  }
+  for (const dmg of dmgs) execFileSync('hdiutil', ['verify', path.join(outputDir, dmg)], { stdio: 'inherit' });
+  for (const zip of zips) execFileSync('unzip', ['-tq', path.join(outputDir, zip)], { stdio: 'inherit' });
+  const app = path.join(outputDir, `mac-${process.arch}`, 'MeetingNotes.app');
+  const runtime = path.join(app, 'Contents', 'Resources', 'runtime', 'meeting-runtime', 'meeting-runtime');
+  await access(runtime);
+  execFileSync(runtime, [], {
+    stdio: 'inherit',
+    env: {
+      ...process.env,
+      MEETING_RUNTIME_VERIFY_ONLY: '1',
+      MEETING_MODELS_DIR: path.join(os.tmpdir(), 'meeting-desktop-runtime-verify'),
+      FFMPEG_PATH: path.join(app, 'Contents', 'Resources', 'tools', 'ffmpeg', 'ffmpeg'),
+      FFPROBE_PATH: path.join(app, 'Contents', 'Resources', 'tools', 'ffmpeg', 'ffprobe')
+    }
+  });
+  console.log(`[desktop-build] macOS artifacts and bundled Runtime verified: ${outputDir}`);
+}
+
+async function copyArtifacts(sourceDir) {
+  await mkdir(releaseDir, { recursive: true });
+  for (const entry of await readdir(sourceDir, { withFileTypes: true })) {
+    await cp(
+      path.join(sourceDir, entry.name),
+      path.join(releaseDir, entry.name),
+      { recursive: entry.isDirectory(), force: true, verbatimSymlinks: true }
+    );
+  }
+  console.log(`[desktop-build] copied verified artifacts to ${releaseDir}`);
+}
+
+const localOutput = isMac
+  ? await mkdtemp(path.join(os.tmpdir(), 'meeting-desktop-build-'))
+  : releaseDir;
+
+try {
+  await runBuilder(localOutput);
+  if (isMac) {
+    await verifyMacArtifacts(localOutput);
+    await copyArtifacts(localOutput);
+    await verifyMacArtifacts(releaseDir);
+  }
+} finally {
+  if (isMac) await rm(localOutput, { recursive: true, force: true });
+}

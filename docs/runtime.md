@@ -2,7 +2,7 @@
 
 桌面 App、AI Runtime、模型文件、会议数据和日志使用独立目录。打包应用不会写 `app.asar` 或 Program Files。
 
-官方桌面安装包内置按平台原生构建的基础 Runtime（PyTorch、Transformers、faster-whisper 等）以及 FFmpeg/FFprobe，普通用户不需要安装 Python、pip 或 FFmpeg。Runtime 以 PyInstaller onedir 形式位于应用 resources 目录，模型权重仍保存在用户数据目录并按需下载。开发模式继续使用项目 venv。
+官方桌面安装包内置按平台原生构建的基础 Runtime（PyTorch、Transformers、faster-whisper、ModelScope 和 Hugging Face Hub）以及 FFmpeg/FFprobe，普通用户不需要安装 Python、pip 或 FFmpeg。Runtime 以 PyInstaller onedir 形式位于应用 resources 目录，模型权重仍保存在用户数据目录并按需下载。模型默认优先使用 ModelScope，失败后回退 Hugging Face；连接和下载超时由 Runtime 控制。开发模式继续使用项目 venv。
 
 标准离线 Runtime 是签名安装包中的只读组件，不能用 pip 原地修改。日语/韩语对齐、Speaker Diarization 和 Linux CUDA vLLM 等可选能力应由后续增强版安装包提供；标准版请求安装这些能力时会返回 `RUNTIME_BUNDLED_FEATURE_UNAVAILABLE`，不会写 Program Files 或 App bundle。
 

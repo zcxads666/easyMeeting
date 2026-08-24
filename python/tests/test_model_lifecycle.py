@@ -13,7 +13,12 @@ def valid_model(directory, qwen=False):
     directory.mkdir(parents=True, exist_ok=True)
     (directory / "config.json").write_text("{}")
     (directory / "model.bin").write_bytes(b"weights")
-    if qwen: (directory / "preprocessor_config.json").write_text("{}")
+    if qwen:
+        (directory / "preprocessor_config.json").write_text("{}")
+        (directory / "tokenizer_config.json").write_text("{}")
+    else:
+        (directory / "tokenizer.json").write_text("{}")
+        (directory / "vocabulary.txt").write_text("tokens")
 
 
 class ModelLifecycleTests(unittest.TestCase):
@@ -74,6 +79,24 @@ class ModelLifecycleTests(unittest.TestCase):
              mock.patch.object(model_manager, "download", side_effect=lambda _id, destination, _cancel: pathlib.Path(destination).mkdir(parents=True, exist_ok=True)):
             manager = model_manager.DownloadManager(); manager.start("whisper-tiny"); self.wait_terminal(manager, "whisper-tiny")
             self.assertEqual(manager.status("whisper-tiny")["status"], "broken")
+
+    def test_broken_final_model_resets_stale_download_before_retry(self):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(model_manager, "MODELS_DIR", pathlib.Path(tmp)), \
+             mock.patch.object(model_manager, "repository_total_bytes", return_value=None), \
+             mock.patch.object(model_manager.shutil, "disk_usage", return_value=mock.Mock(free=10**12)):
+            final = model_manager._whisper_local_dir("tiny"); final.mkdir(parents=True)
+            (final / "config.json").write_text("{}")
+            temporary = model_manager.download_dir("whisper-tiny"); temporary.mkdir(parents=True)
+            (temporary / "stale-partial.bin").write_bytes(b"stale")
+            manager = model_manager.DownloadManager()
+
+            def fresh_download(_id, destination, _cancel):
+                self.assertFalse((pathlib.Path(destination) / "stale-partial.bin").exists())
+                valid_model(pathlib.Path(destination))
+
+            with mock.patch.object(model_manager, "download", side_effect=fresh_download):
+                manager.start("whisper-tiny"); self.wait_terminal(manager, "whisper-tiny")
+            self.assertEqual(manager.status("whisper-tiny")["status"], "ready")
 
     def test_delete_and_per_model_lock(self):
         with tempfile.TemporaryDirectory() as tmp, mock.patch.object(model_manager, "MODELS_DIR", pathlib.Path(tmp)):

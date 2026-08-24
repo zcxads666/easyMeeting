@@ -18,7 +18,18 @@ WHISPER_SIZES = ["tiny", "base", "small", "medium", "large-v3"]
 QWEN_MODELS = ["Qwen/Qwen3-ASR-0.6B-hf", "Qwen/Qwen3-ASR-1.7B-hf"]
 ALIGNER_MODELS = ["Qwen/Qwen3-ForcedAligner-0.6B-hf"]
 DIARIZATION_MODELS = ["pyannote/speaker-diarization-community-1"]
-DEFAULT_SOURCE = os.environ.get("MEETING_MODEL_SOURCE", "huggingface")
+DEFAULT_SOURCE = os.environ.get("MEETING_MODEL_SOURCE", "modelscope").strip().lower()
+if DEFAULT_SOURCE not in {"modelscope", "huggingface"}:
+    DEFAULT_SOURCE = "modelscope"
+NETWORK_TIMEOUT_SECONDS = max(3, int(os.environ.get("MEETING_MODEL_NETWORK_TIMEOUT", "12")))
+# These are read by huggingface_hub when its HTTP clients are created. Keep
+# them bounded so a blocked repository cannot leave the UI at “connecting”.
+os.environ.setdefault("HF_HUB_ETAG_TIMEOUT", str(NETWORK_TIMEOUT_SECONDS))
+os.environ.setdefault("HF_HUB_DOWNLOAD_TIMEOUT", str(max(30, NETWORK_TIMEOUT_SECONDS * 3)))
+# ModelScope is the default domestic source. Its constants are imported lazily
+# by the downloader, so set conservative API timeouts before that import.
+os.environ.setdefault("MODELSCOPE_API_HTTP_CLIENT_TIMEOUT", str(max(15, NETWORK_TIMEOUT_SECONDS * 2)))
+os.environ.setdefault("MODELSCOPE_API_HTTP_CLIENT_CONNECT_TIMEOUT", str(NETWORK_TIMEOUT_SECONDS))
 REFERENCE_SIZES_GB = {
     "whisper-tiny": .08, "whisper-base": .15, "whisper-small": .5,
     "whisper-medium": 1.5, "whisper-large-v3": 3.0,
@@ -28,17 +39,17 @@ REFERENCE_SIZES_GB = {
 }
 MODEL_CATALOG = [
     *[{"id": f"whisper-{s}", "label": f"Whisper {s}", "role": "asr", "engine": "whisper", "backend": "faster-whisper",
-       "source": "modelscope" if DEFAULT_SOURCE == "modelscope" else "huggingface",
+       "source": DEFAULT_SOURCE,
        "estimatedSize": int(REFERENCE_SIZES_GB[f"whisper-{s}"] * 1024 ** 3),
        "supportedDevices": ["cpu", "cuda"], "recommendedDevice": "cuda" if s in ("medium", "large-v3") else "auto",
        "computeTypes": {"cpu": ["int8", "float32"], "cuda": ["float16", "int8_float16", "float32"]},
        "supportsTimestamps": True, "supportsStreaming": False} for s in WHISPER_SIZES],
     *[{"id": mid, "label": mid.removeprefix("Qwen/"), "role": "asr", "engine": "qwen", "backend": "transformers",
-       "source": "huggingface", "estimatedSize": int(REFERENCE_SIZES_GB[mid] * 1024 ** 3),
+       "source": DEFAULT_SOURCE, "estimatedSize": int(REFERENCE_SIZES_GB[mid] * 1024 ** 3),
        "supportedDevices": ["cpu", "cuda", "mps"], "recommendedDevice": "auto",
        "supportsTimestamps": False, "supportsStreaming": False} for mid in QWEN_MODELS],
     *[{"id": mid, "label": mid.removeprefix("Qwen/"), "role": "aligner", "engine": "qwen-forced-aligner",
-       "backend": "transformers", "source": "huggingface",
+       "backend": "transformers", "source": DEFAULT_SOURCE,
        "estimatedSize": int(REFERENCE_SIZES_GB[mid] * 1024 ** 3),
        "supportedDevices": ["cpu", "cuda", "mps"], "recommendedDevice": "auto",
        "supportedLanguages": ["Chinese", "English", "Cantonese", "French", "German", "Italian",
@@ -109,6 +120,15 @@ def model_dir(model_id):
 def download_dir(model_id): return MODELS_DIR / DOWNLOADS_DIR_NAME / model_id.replace("/", "--")
 
 
+def source_candidates(model_id):
+    """Return download sources in priority order, with a safe fallback."""
+    item = CATALOG_BY_ID.get(model_id)
+    if not item: raise ModelLifecycleError("MODEL_UNKNOWN", f"未知模型: {model_id}")
+    if item["role"] == "diarization": return ["huggingface"]
+    alternate = "huggingface" if DEFAULT_SOURCE == "modelscope" else "modelscope"
+    return [DEFAULT_SOURCE, alternate]
+
+
 def exists(directory):
     """Loader compatibility; product readiness is determined by verify_model()."""
     directory = Path(directory)
@@ -117,8 +137,24 @@ def exists(directory):
 
 def _weight_exists(directory):
     names = {file.name for file in Path(directory).glob("*") if file.is_file()}
-    return bool({"model.bin", "model.safetensors", "pytorch_model.bin"} & names) or any(
-        name.endswith(".safetensors") or name.endswith(".index.json") for name in names)
+    return any((Path(directory) / name).stat().st_size > 0 for name in names if
+               name in {"model.bin", "model.safetensors", "pytorch_model.bin"} or
+               name.endswith(".safetensors") or name.endswith(".index.json"))
+
+
+def _nonempty_file(directory, name):
+    file = Path(directory) / name
+    try: return file.is_file() and file.stat().st_size > 0
+    except OSError: return False
+
+
+def _valid_json_file(directory, name):
+    if not _nonempty_file(directory, name): return False
+    try:
+        json.loads((Path(directory) / name).read_text(encoding="utf-8"))
+        return True
+    except (OSError, UnicodeDecodeError, json.JSONDecodeError):
+        return False
 
 
 def verify_structure(model_id, directory):
@@ -132,17 +168,22 @@ def verify_structure(model_id, directory):
             if not component_dir.is_dir() or not _weight_exists(component_dir): return False, f"{component} component missing"
         if not (directory / "plda").is_dir(): return False, "plda component missing"
         return True, None
-    if not (directory / "config.json").is_file(): return False, "config.json missing"
+    if not _valid_json_file(directory, "config.json"): return False, "config.json missing or invalid"
     if not _weight_exists(directory): return False, "model weights missing"
-    if item["backend"] == "transformers" and not any((directory / name).is_file() for name in
-                                               ("preprocessor_config.json", "processor_config.json")):
+    if item["backend"] == "faster-whisper":
+        for name in ("tokenizer.json", "vocabulary.txt"):
+            if not _nonempty_file(directory, name): return False, f"{name} missing"
+    if item["backend"] == "transformers" and not any(_valid_json_file(directory, name) for name in
+                                                       ("preprocessor_config.json", "processor_config.json")):
         return False, "processor config missing"
+    if item["backend"] == "transformers" and not _valid_json_file(directory, "tokenizer_config.json"):
+        return False, "tokenizer_config.json missing or invalid"
     return True, None
 
 
-def _write_manifest(model_id, directory, revision=None):
+def _write_manifest(model_id, directory, revision=None, source=None):
     item = CATALOG_BY_ID[model_id]; target = Path(directory) / MANIFEST_NAME; tmp = target.with_suffix(".tmp")
-    value = {"schemaVersion": 1, "modelId": model_id, "backend": item["backend"], "source": item["source"],
+    value = {"schemaVersion": 1, "modelId": model_id, "backend": item["backend"], "source": source or item["source"],
              "revision": revision, "installedAt": int(time.time() * 1000), "sizeBytes": dir_size_bytes(directory),
              "verifiedAt": int(time.time() * 1000)}
     tmp.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8"); os.replace(tmp, target)
@@ -181,11 +222,12 @@ def model_in_use(model_id):
 def _repository(model_id): return f"Systran/faster-whisper-{model_id.removeprefix('whisper-')}" if model_id.startswith("whisper-") else model_id
 
 
-def repository_total_bytes(model_id, token=None):
-    if CATALOG_BY_ID[model_id]["source"] != "huggingface": return None
+def repository_total_bytes(model_id, token=None, source=None):
+    if source != "huggingface": return None
     try:
         from huggingface_hub import HfApi
-        info = HfApi().model_info(_repository(model_id), files_metadata=True, token=token)
+        info = HfApi(endpoint=os.environ.get("HF_ENDPOINT") or None).model_info(
+            _repository(model_id), files_metadata=True, token=token, timeout=NETWORK_TIMEOUT_SECONDS)
         siblings = info.siblings
         _repository_revisions[model_id] = getattr(info, "sha", None)
         sizes = [getattr(file, "size", None) for file in siblings]
@@ -207,21 +249,45 @@ def _cancel_tqdm(cancel_event):
     return CancelableTqdm
 
 
+_download_sources = {}
+
+
+def _reset_directory(directory):
+    directory = Path(directory)
+    if directory.exists(): shutil.rmtree(directory)
+    directory.mkdir(parents=True, exist_ok=True)
+
+
 def download(model_id, destination=None, cancel_event=None, token=None):
     if model_id not in CATALOG_BY_ID: raise ModelLifecycleError("MODEL_UNKNOWN", f"未知模型: {model_id}")
     ensure_dir(); destination = Path(destination or download_dir(model_id)); destination.mkdir(parents=True, exist_ok=True)
-    item = CATALOG_BY_ID[model_id]; repository = _repository(model_id)
-    if item["source"] == "modelscope":
-        try: from modelscope.hub.snapshot_download import snapshot_download
-        except ImportError as exc: raise RuntimeError("缺少依赖 modelscope") from exc
-        snapshot_download(repository, local_dir=str(destination))
-    else:
-        try: from huggingface_hub import snapshot_download
-        except ImportError as exc: raise RuntimeError("缺少依赖 huggingface_hub") from exc
-        snapshot_download(repo_id=repository, local_dir=str(destination),
-                          tqdm_class=_cancel_tqdm(cancel_event), token=token)
-    if cancel_event and cancel_event.is_set(): raise InterruptedError("模型下载已取消")
-    return destination
+    repository = _repository(model_id); failures = []
+    for index, source in enumerate(source_candidates(model_id)):
+        if cancel_event and cancel_event.is_set(): raise InterruptedError("模型下载已取消")
+        if index: _reset_directory(destination)
+        try:
+            if source == "modelscope":
+                try: from modelscope.hub.snapshot_download import snapshot_download
+                except ImportError as exc: raise RuntimeError("缺少依赖 modelscope") from exc
+                snapshot_download(repository, local_dir=str(destination))
+            else:
+                try: from huggingface_hub import snapshot_download
+                except ImportError as exc: raise RuntimeError("缺少依赖 huggingface_hub") from exc
+                snapshot_download(repo_id=repository, local_dir=str(destination),
+                                  etag_timeout=NETWORK_TIMEOUT_SECONDS,
+                                  tqdm_class=_cancel_tqdm(cancel_event), token=token,
+                                  endpoint=os.environ.get("HF_ENDPOINT") or None)
+            if cancel_event and cancel_event.is_set(): raise InterruptedError("模型下载已取消")
+            valid, reason = verify_structure(model_id, destination)
+            if not valid: raise RuntimeError(f"下载完成但校验失败: {reason}")
+            _download_sources[model_id] = source
+            return destination
+        except InterruptedError: raise
+        except Exception as exc:
+            failures.append(f"{source}: {type(exc).__name__}: {exc}")
+            logger.warning("model download source failed model=%s source=%s type=%s",
+                           model_id, source, type(exc).__name__)
+    raise RuntimeError("模型下载失败；已尝试国内源和备用源。" + " | ".join(failures))
 
 
 def _finalize(model_id, temporary):
@@ -250,7 +316,8 @@ class DownloadManager:
     @staticmethod
     def _record(status, **extra):
         return {"status": status, "downloadedBytes": 0, "totalBytes": None, "progress": None,
-                "speedBytesPerSecond": None, "etaSeconds": None, "error": None, **extra}
+                "speedBytesPerSecond": None, "etaSeconds": None, "error": None,
+                "source": None, "phase": None, **extra}
     def _recover(self):
         if not MODELS_DIR.is_dir(): return
         for model_id in known_ids():
@@ -272,8 +339,13 @@ class DownloadManager:
             existing = self.records.get(model_id)
             if existing and existing["status"] in ("queued", "downloading", "verifying"):
                 return {"alreadyDownloading": True, **dict(existing)}
-            event = threading.Event(); self.cancel_events[model_id] = event; self.records[model_id] = self._record("queued")
-        threading.Thread(target=self._run, args=(model_id, event, token), daemon=True, name="model-download").start()
+            reset_download = bool(existing and existing["status"] in ("error", "broken"))
+            final_state = verify_model(model_id, create_legacy_manifest=False)
+            reset_download = reset_download or final_state["status"] == "broken"
+            event = threading.Event(); self.cancel_events[model_id] = event
+            self.records[model_id] = self._record("queued", resetDownload=reset_download)
+        threading.Thread(target=self._run, args=(model_id, event, token, reset_download),
+                         daemon=True, name="model-download").start()
         return self.status(model_id)
     def cancel(self, model_id):
         with self.guard:
@@ -291,26 +363,34 @@ class DownloadManager:
             eta = (total - maximum) / speed if total and speed and speed > 1024 and total >= maximum else None
             self._set(model_id, downloadedBytes=maximum, totalBytes=total, progress=progress,
                       speedBytesPerSecond=speed, etaSeconds=eta if eta is None or eta < 604800 else None)
-    def _run(self, model_id, cancel_event, token=None):
+    def _run(self, model_id, cancel_event, token=None, reset_download=False):
         temporary = download_dir(model_id); monitor_stop = threading.Event(); monitor = None
         try:
             with model_operation(model_id):
                 estimated = CATALOG_BY_ID[model_id]["estimatedSize"]; ensure_dir(); available = shutil.disk_usage(MODELS_DIR).free
+                if reset_download: _reset_directory(temporary)
                 present = _walk_size(temporary) if temporary.exists() else 0
                 required = max(64 * 1024 ** 2, int(max(0, estimated - present) * 1.2))
                 if available < required: raise ModelLifecycleError("DISK_SPACE_INSUFFICIENT", "磁盘空间不足", requiredBytes=required, availableBytes=available)
-                total = repository_total_bytes(model_id, token)
-                self._set(model_id, status="downloading", totalBytes=total, error=None, startedAt=int(time.time() * 1000))
+                preferred_source = source_candidates(model_id)[0]
+                self._set(model_id, status="downloading", source=preferred_source, phase="connecting",
+                          totalBytes=None, error=None, startedAt=int(time.time() * 1000))
+                total = repository_total_bytes(model_id, token, preferred_source)
+                self._set(model_id, totalBytes=total, phase="downloading")
                 monitor = threading.Thread(target=self._monitor, args=(model_id, temporary, total, monitor_stop), daemon=True); monitor.start()
+                _download_sources.pop(model_id, None)
                 if token: download(model_id, temporary, cancel_event, token)
                 else: download(model_id, temporary, cancel_event)
                 if cancel_event.is_set(): raise InterruptedError("模型下载已取消")
                 self._set(model_id, status="verifying", progress=100 if total else None)
                 valid, reason = verify_structure(model_id, temporary)
                 if not valid: raise ModelLifecycleError("MODEL_INCOMPLETE", f"模型文件不完整: {reason}")
-                _write_manifest(model_id, temporary, _repository_revisions.get(model_id)); _finalize(model_id, temporary); size = dir_size_bytes(model_dir(model_id))
+                actual_source = _download_sources.get(model_id, CATALOG_BY_ID[model_id]["source"])
+                _write_manifest(model_id, temporary, _repository_revisions.get(model_id), actual_source)
+                _finalize(model_id, temporary); size = dir_size_bytes(model_dir(model_id))
                 self._set(model_id, status="ready", downloadedBytes=size, totalBytes=total, progress=100 if total else None,
-                          speedBytesPerSecond=None, etaSeconds=None, completedAt=int(time.time() * 1000), error=None)
+                          speedBytesPerSecond=None, etaSeconds=None, completedAt=int(time.time() * 1000),
+                          error=None, phase="complete", source=actual_source)
         except InterruptedError:
             self._set(model_id, status="cancelled", progress=None, speedBytesPerSecond=None, etaSeconds=None,
                       error={"code": "DOWNLOAD_CANCELLED", "message": "模型下载已取消"})
@@ -321,7 +401,7 @@ class DownloadManager:
             logger.exception("model download failed model=%s type=%s", model_id, type(exc).__name__)
             gated = type(exc).__name__ in {"GatedRepoError", "RepositoryNotFoundError"} or getattr(getattr(exc, "response", None), "status_code", None) in (401, 403)
             self._set(model_id, status="error", progress=None, speedBytesPerSecond=None, etaSeconds=None,
-                      error={"code": "HF_AUTH_FAILED" if gated else "MODEL_DOWNLOAD_FAILED",
+                      phase="failed", error={"code": "HF_AUTH_FAILED" if gated else "MODEL_DOWNLOAD_FAILED",
                              "message": "Hugging Face 授权失败；请确认已接受模型条款且 Token 有效" if gated else str(exc)})
         finally:
             monitor_stop.set()

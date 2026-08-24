@@ -12,7 +12,7 @@
 - `TaskManager` 使用内存 lane：local=1、cloud=3、runtime=1。ASR、Alignment、Diarization、post-processing 和 Benchmark 共享 local lane。
 - `RuntimeManager` 将 Runtime 安装/验证与 daemon start/restart 分离。生产桌面必须由用户显式安装。
 - `SecretStore` 在 Electron 使用 safeStorage 加密文件，standalone 优先环境变量。
-- Python `DownloadManager` 为每个模型提供互斥锁、临时下载目录、取消、磁盘预检、验证、manifest 和 finalize。
+- Python `DownloadManager` 为每个模型提供互斥锁、临时下载目录、取消、磁盘预检、ModelScope 优先/Hugging Face 回退、网络超时、关键文件验证、manifest 和原子 finalize。
 
 ## Model state and storage
 
@@ -23,7 +23,7 @@ not_installed → queued → downloading → verifying → ready
              invalid files → broken → retry/verify
 ```
 
-完整模型位于 `MEETING_MODELS_DIR`；中断数据位于 `.downloads/`。manifest 只包含模型 ID、backend、source、revision（可得时）、大小和时间，不包含 credential。
+完整模型位于 `MEETING_MODELS_DIR`；中断数据位于 `.downloads/`。最终模型或临时目录被判定为损坏时，下一次重试会清理对应下载目录，避免污染文件被继续复用。manifest 只包含模型 ID、backend、source、revision（可得时）、大小和时间，不包含 credential。
 
 Runtime 与模型状态独立：Runtime broken 时 Node 仍可扫描模型目录并显示 ready/broken，但加载、下载和 Benchmark 会被禁用。
 

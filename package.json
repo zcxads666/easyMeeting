@@ -22,7 +22,7 @@
     "dist": "node scripts/build-release.mjs",
     "desktop": "electron .",
     "desktop:dev": "concurrently -k -n web,electron \"npm:dev:web\" \"electron . --dev\"",
-    "desktop:dist": "npm run build:runtime && electron-builder"
+    "desktop:dist": "npm run build:runtime && node scripts/build-desktop.mjs"
   },
   "dependencies": {
     "@derhuerst/ffprobe-static": "5.3.0",
