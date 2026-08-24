@@ -92,7 +92,10 @@ def capabilities(torch_module=None):
     }
 
 def health():
-    required = ("fastapi", "uvicorn", "numpy", "faster_whisper", "transformers", "torch")
+    # Model downloads for both faster-whisper and Qwen use Hugging Face Hub.
+    # Keep it in the health gate so a packaged Runtime cannot report complete
+    # while the first model download would fail with ImportError.
+    required = ("fastapi", "uvicorn", "numpy", "faster_whisper", "transformers", "torch", "huggingface_hub")
     packages = {name: importlib.util.find_spec(name) is not None for name in required}
     model_runtime, runtime_error = False, None
     if packages["torch"] and packages["transformers"]:
