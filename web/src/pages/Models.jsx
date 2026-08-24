@@ -17,6 +17,7 @@ export default function Models() {
   const settings = useStore((s) => s.settings);
   const pollRef = useRef(null);
   const retryTimerRef = useRef(null);
+  const autoSwitchingRef = useRef(new Set());
 
   // 加载模型列表；失败或占用未计算完成时自动重试。
   // silent=true 时静默刷新（保留旧列表，避免闪烁/滚动跳动）
@@ -72,11 +73,25 @@ export default function Models() {
     if (!downloading) return;
     const st = status[downloading];
     if (st && ['ready', 'cancelled', 'error', 'broken'].includes(st.status)) {
+      const id = downloading;
       setDownloading(null);
-      load(3, true);
-      if (['error', 'broken'].includes(st.status)) setError(`下载失败: ${st.error?.message || st.error || ''}`);
+      const downloaded = models.find((model) => model.id === id);
+      (async () => {
+        if (st.status === 'ready' && downloaded?.role === 'asr' && !autoSwitchingRef.current.has(id)) {
+          autoSwitchingRef.current.add(id);
+          try {
+            await switchModel(id);
+          } catch (e) {
+            setError(`模型已下载，但自动切换失败：${e.message}`);
+          } finally {
+            autoSwitchingRef.current.delete(id);
+          }
+        }
+        await load(3, true);
+        if (['error', 'broken'].includes(st.status)) setError(`下载失败: ${st.error?.message || st.error || ''}`);
+      })();
     }
-  }, [status, downloading, load]);
+  }, [status, downloading, models, load]);
 
   const download = async (id) => {
     setDownloading(id);
@@ -95,7 +110,12 @@ export default function Models() {
     catch (e) { setError(e.message); }
   };
   const verify = async (id) => {
-    try { await api('/models/verify', { method: 'POST', body: { id } }); await load(0, true); }
+    try {
+      const result = await api('/models/verify', { method: 'POST', body: { id } });
+      const model = models.find((item) => item.id === id);
+      if (result.status === 'ready' && model?.role === 'asr') await switchModel(id);
+      await load(0, true);
+    }
     catch (e) { setError(e.message); }
   };
 
@@ -110,7 +130,7 @@ export default function Models() {
   const switchModel = async (id) => {
     try {
       await api('/models/switch', { method: 'POST', body: { id } });
-      await useStore.getState().saveSettings({ asr: { local: { engine: id.startsWith('whisper') ? 'whisper' : 'qwen', model: id } } });
+      await useStore.getState().saveSettings({ asr: { provider: 'local', local: { engine: id.startsWith('whisper') ? 'whisper' : 'qwen', model: id } } });
       await load(3, true);
     } catch (e) { setError(e.message); }
   };
@@ -157,6 +177,15 @@ export default function Models() {
       setBenchmarks((value) => ({ ...value, [id]: { taskId, status: 'queued', stage: 'queued' } }));
     } catch (e) { setError(e.message); }
   };
+  const cancelBenchmark = async (id) => {
+    const taskId = benchmarks[id]?.taskId;
+    if (!taskId) return;
+    try {
+      await api(`/tasks/${taskId}/cancel`, { method: 'POST' });
+      const task = await api(`/tasks/${taskId}`);
+      setBenchmarks((all) => ({ ...all, [id]: task }));
+    } catch (e) { setError(e.message); }
+  };
   useEffect(() => {
     const active = Object.entries(benchmarks).filter(([, value]) => value.taskId && !['completed', 'failed', 'cancelled'].includes(value.status));
     if (!active.length) return;
@@ -195,7 +224,7 @@ export default function Models() {
       {runtime && <RuntimePanel runtime={runtime} busy={Boolean(runtimeTask)} onAction={runtimeAction} onInstallFeature={installFeature} />}
 
       <div className="card p-4 mb-6 flex items-center gap-3">
-        <label className="text-sm text-gray-500">性能测试音频</label>
+        <div className="shrink-0"><label className="text-sm text-gray-500">性能测试音频</label><p className="text-xs text-gray-400 mt-1">仅测试前 15 秒，可随时取消</p></div>
         <select className="input flex-1" value={benchmarkMeeting} onChange={(e) => setBenchmarkMeeting(e.target.value)}>
           <option value="">请选择包含音频的会议</option>
           {meetings.map((meeting) => <option key={meeting.id} value={meeting.id}>{meeting.title}</option>)}
@@ -214,12 +243,12 @@ export default function Models() {
         <div className="space-y-4">
           <h2 className="font-semibold text-lg">Whisper</h2>
           {models.filter((m) => m.kind === 'whisper').map((m) => (
-            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} benchmark={benchmarks[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onBenchmark={benchmark} onDelete={del} onSwitch={switchModel} />
+            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} benchmark={benchmarks[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onBenchmark={benchmark} onCancelBenchmark={cancelBenchmark} onDelete={del} onSwitch={switchModel} />
           ))}
 
           <h2 className="font-semibold text-lg pt-4">Qwen3-ASR</h2>
           {models.filter((m) => m.kind === 'qwen').map((m) => (
-            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} benchmark={benchmarks[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onBenchmark={benchmark} onDelete={del} onSwitch={switchModel} />
+            <ModelRow key={m.id} m={m} current={current} downloading={downloading} status={status[m.id]} benchmark={benchmarks[m.id]} runtimeReady={['ready', 'running'].includes(runtime?.status)} onDownload={download} onCancel={cancelDownload} onVerify={verify} onBenchmark={benchmark} onCancelBenchmark={cancelBenchmark} onDelete={del} onSwitch={switchModel} />
           ))}
 
           <h2 className="font-semibold text-lg pt-4">精确时间轴模型</h2>
@@ -278,7 +307,7 @@ function RuntimeItem({ label, value }) {
   return <div><p className="text-xs text-gray-400">{label}</p><p className="truncate" title={String(value)}>{value}</p></div>;
 }
 
-function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, onDownload, onCancel, onVerify, onBenchmark, onDelete, onSwitch }) {
+function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, onDownload, onCancel, onVerify, onBenchmark, onCancelBenchmark, onDelete, onSwitch }) {
   const isAsr = (m.role || 'asr') === 'asr';
   const isCurrent = current === m.id && m.installed;
   const isDownloading = downloading === m.id;
@@ -322,7 +351,12 @@ function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, on
           </div>
         )}
         {m.error && <p className="text-xs text-red-500 mt-2">{m.error.message || String(m.error)}</p>}
-        {benchmark?.status === 'running' && <p className="text-xs text-blue-500 mt-2">性能测试：{benchmark.stage}</p>}
+        {benchmark && ['queued', 'running'].includes(benchmark.status) && (
+          <div className="flex items-center gap-2 text-xs text-blue-500 mt-2">
+            <p>性能测试：{benchmarkStageLabel(benchmark.stage)} · 已用 {formatDuration(((Date.now() - (benchmark.startedAt || benchmark.createdAt || Date.now())) / 1000))}</p>
+            <button className="text-gray-500 hover:text-red-500" onClick={() => onCancelBenchmark?.(m.id)}>取消</button>
+          </div>
+        )}
         {benchmark?.status === 'completed' && <BenchmarkResult result={benchmark.result} />}
       </div>
       <div className="flex gap-2 shrink-0">
@@ -333,7 +367,7 @@ function ModelRow({ m, current, downloading, status, benchmark, runtimeReady, on
         ) : m.installed ? (
           <>
             {isAsr && !isCurrent && <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady} onClick={() => onSwitch(m.id)}>切换</button>}
-            {isAsr && <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady || benchmark?.status === 'running'} onClick={() => onBenchmark(m.id)}>性能测试</button>}
+            {isAsr && <button className="btn-secondary !py-1.5 text-sm" disabled={!runtimeReady || ['queued', 'running'].includes(benchmark?.status)} onClick={() => onBenchmark(m.id)}>性能测试</button>}
             <button className="btn-secondary !py-1.5 text-sm text-red-500" onClick={() => onDelete(m.id)}>删除</button>
           </>
         ) : (
@@ -354,6 +388,10 @@ function BenchmarkResult({ result: r }) {
     <span>RTF {r.rtf?.toFixed(2)}</span><span>速度 {r.realtimeFactor?.toFixed(2)}x realtime</span>
     <span>{r.coldStart ? '冷启动' : '热模型'}</span>
   </div>;
+}
+
+function benchmarkStageLabel(stage) {
+  return { queued: '排队中', preparing: '准备音频（最长 15 秒）', loading_model: '加载模型', benchmarking: '推理测试' }[stage] || stage || '处理中';
 }
 
 function formatBytes(bytes) {

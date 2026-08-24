@@ -1,8 +1,10 @@
+import path from 'node:path';
+
 const PROVIDERS = new Set(['qwen', 'volc', 'mimo', 'local']);
 const DEVICES = new Set(['auto', 'cpu', 'cuda', 'mps']);
 const ENGINES = new Set(['whisper', 'qwen']);
 const ALLOWED = {
-  '': new Set(['schemaVersion', 'secretMigrationVersion', 'llm', 'asr', 'correction', 'huggingFace', 'alignment', 'diarization', 'postProcessing', 'realtime', 'ui']),
+  '': new Set(['schemaVersion', 'secretMigrationVersion', 'llm', 'asr', 'correction', 'huggingFace', 'alignment', 'diarization', 'postProcessing', 'realtime', 'ui', 'storage']),
   llm: new Set(['baseUrl', 'apiKey', 'model', 'temperature']),
   asr: new Set(['provider', 'qwen', 'volc', 'mimo', 'local']),
   'asr.qwen': new Set(['apiKey', 'model']), 'asr.volc': new Set(['appid', 'token', 'cluster']),
@@ -10,7 +12,8 @@ const ALLOWED = {
   correction: new Set(['enabled']), huggingFace: new Set(['token']),
   alignment: new Set(['model', 'device', 'language']),
   diarization: new Set(['model', 'device', 'numSpeakers', 'minSpeakers', 'maxSpeakers']),
-  postProcessing: new Set(['autoAlign', 'autoDiarize']), realtime: new Set(['mode']), ui: new Set(['theme'])
+  postProcessing: new Set(['autoAlign', 'autoDiarize']), realtime: new Set(['mode']), ui: new Set(['theme']),
+  storage: new Set(['modelsDir', 'mediaDir'])
 };
 
 function fail(message) { const error = new Error(message); error.code = 'INVALID_SETTINGS'; throw error; }
@@ -24,6 +27,10 @@ function validateObject(value, path = '') {
   }
 }
 const shortString = (value, name, max = 256) => { if (typeof value !== 'string' || value.length > max) fail(`${name} 必须是长度不超过 ${max} 的字符串`); };
+const absolutePath = (value, name) => {
+  shortString(value, name, 2048);
+  if (value && !path.isAbsolute(value) && !/^[A-Za-z]:[\\/]/.test(value)) fail(`${name} 必须是绝对路径`);
+};
 
 export function validateSettingsPatch(patch) {
   validateObject(patch);
@@ -39,6 +46,8 @@ export function validateSettingsPatch(patch) {
   if (patch.asr?.local?.device != null && !DEVICES.has(patch.asr.local.device)) fail('无效的 asr.local.device');
   if (patch.asr?.local?.model != null) shortString(patch.asr.local.model, 'asr.local.model');
   if (patch.ui?.theme != null && !['light', 'dark'].includes(patch.ui.theme)) fail('无效的 ui.theme');
+  if (patch.storage?.modelsDir != null) absolutePath(patch.storage.modelsDir, 'storage.modelsDir');
+  if (patch.storage?.mediaDir != null) absolutePath(patch.storage.mediaDir, 'storage.mediaDir');
   if (patch.correction?.enabled != null && typeof patch.correction.enabled !== 'boolean') fail('correction.enabled 必须是 boolean');
   if (patch.alignment?.device != null && !DEVICES.has(patch.alignment.device)) fail('无效的 alignment.device');
   if (patch.alignment?.language != null) shortString(patch.alignment.language, 'alignment.language', 32);
@@ -60,7 +69,7 @@ export function validateSettingsPatch(patch) {
 
 export function migrateSettings(input) {
   const settings = structuredClone(input || {}); let version = Number(settings.schemaVersion) || 1;
-  if (version > 4) fail(`不支持的 settings schemaVersion: ${version}`);
+  if (version > 5) fail(`不支持的 settings schemaVersion: ${version}`);
   if (version < 2) { settings.asr ||= {}; settings.asr.local ||= {}; settings.asr.local.device ||= 'auto'; version = 2; }
   if (version < 3) version = 3;
   if (version < 4) {
@@ -71,6 +80,7 @@ export function migrateSettings(input) {
     settings.realtime ||= { mode: 'auto' };
     version = 4;
   }
+  if (version < 5) { settings.storage ||= {}; version = 5; }
   settings.schemaVersion = version;
   return settings;
 }

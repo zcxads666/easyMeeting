@@ -74,6 +74,7 @@ router.post('/download/cancel', (req, res) => proxy('/models/download/cancel', r
 router.post('/verify', (req, res) => proxy('/models/verify', req, res));
 router.post('/switch', (req, res) => proxy('/models/switch', req, res));
 router.post(/^\/(.+)\/benchmark$/, async (req, res) => {
+  const BENCHMARK_MAX_SECONDS = 15;
   const id = decodeURIComponent(req.params[0]); const { meetingId } = req.body || {};
   const meeting = await getMeeting(meetingId);
   if (!meeting) return res.status(404).json({ error: '会议不存在', code: 'MEETING_NOT_FOUND' });
@@ -84,20 +85,28 @@ router.post(/^\/(.+)\/benchmark$/, async (req, res) => {
   if (!['ready', 'running'].includes(runtime.status)) return res.status(409).json({ error: '本地 AI Runtime 未就绪', code: 'RUNTIME_NOT_READY' });
   const settings = await getSettings();
   const task = taskManager.create({ type: 'model_benchmark', lane: 'local', metadata: { modelId: id, meetingId }, run: async (context) => {
-    let pcmPath;
+    let pcmPath; let heartbeat;
     try {
-      context.update('preparing'); pcmPath = await transcodeToPcm(audio.path, `benchmark_${Date.now()}.pcm`);
+      context.update('preparing'); pcmPath = await transcodeToPcm(audio.path, `benchmark_${Date.now()}.pcm`, { durationSeconds: BENCHMARK_MAX_SECONDS });
       if (context.isCancellationRequested()) return null;
       context.update('loading_model');
       context.update('benchmarking');
+      const startedAt = Date.now();
+      heartbeat = setInterval(() => {
+        const elapsed = (Date.now() - startedAt) / 1000;
+        context.update('benchmarking', Math.min(95, Math.round(elapsed / 6)));
+      }, 1000);
       const response = await fetch(`${getPythonUrl()}/models/benchmark`, { method: 'POST', headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ id, file: pcmPath, device: settings.asr.local.device || 'auto',
           compute_type: settings.asr.local.computeType || null, warmup_runs: 1, measured_runs: 1 }),
-        signal: AbortSignal.any([context.signal, AbortSignal.timeout(30 * 60 * 1000)]) });
+        signal: AbortSignal.any([context.signal, AbortSignal.timeout(10 * 60 * 1000)]) });
       const result = await response.json().catch(() => ({}));
       if (!response.ok) { const detail = result.detail || result; throw Object.assign(new Error(detail.message || JSON.stringify(detail)), { code: detail.code || 'BENCHMARK_FAILED' }); }
       return result;
-    } finally { if (pcmPath) await fsp.unlink(pcmPath).catch(() => {}); }
+    } finally {
+      if (heartbeat) clearInterval(heartbeat);
+      if (pcmPath) await fsp.unlink(pcmPath).catch(() => {});
+    }
   }});
   res.status(202).json({ taskId: task.id });
 });

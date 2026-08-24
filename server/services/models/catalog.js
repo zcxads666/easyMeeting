@@ -5,15 +5,15 @@ import { MODELS_DIR } from '../../config.js';
 const GB = 1024 ** 3;
 export const MODEL_CATALOG = [
   ...[['tiny', .08], ['base', .15], ['small', .5], ['medium', 1.5], ['large-v3', 3]].map(([size, gb]) => ({
-    id: `whisper-${size}`, label: `Whisper ${size}`, role: 'asr', engine: 'whisper', kind: 'whisper', backend: 'faster-whisper', source: 'huggingface',
+    id: `whisper-${size}`, label: `Whisper ${size}`, role: 'asr', engine: 'whisper', kind: 'whisper', backend: 'faster-whisper', source: 'modelscope',
     estimatedSizeBytes: Math.round(gb * GB), supportedDevices: ['cpu', 'cuda']
   })),
   ...[['Qwen/Qwen3-ASR-0.6B-hf', 1.6], ['Qwen/Qwen3-ASR-1.7B-hf', 3.8]].map(([id, gb]) => ({
-    id, label: id.replace('Qwen/', ''), role: 'asr', engine: 'qwen', kind: 'qwen', backend: 'transformers', source: 'huggingface',
+    id, label: id.replace('Qwen/', ''), role: 'asr', engine: 'qwen', kind: 'qwen', backend: 'transformers', source: 'modelscope',
     estimatedSizeBytes: Math.round(gb * GB), supportedDevices: ['cpu', 'cuda', 'mps']
   })),
   { id: 'Qwen/Qwen3-ForcedAligner-0.6B-hf', label: 'Qwen3-ForcedAligner-0.6B-hf', role: 'aligner',
-    engine: 'qwen-forced-aligner', kind: 'qwen-forced-aligner', backend: 'transformers', source: 'huggingface',
+    engine: 'qwen-forced-aligner', kind: 'qwen-forced-aligner', backend: 'transformers', source: 'modelscope',
     estimatedSizeBytes: Math.round(1.8 * GB), supportedDevices: ['cpu', 'cuda', 'mps'] },
   { id: 'pyannote/speaker-diarization-community-1', label: 'Speaker Diarization Community-1', role: 'diarization',
     engine: 'pyannote', kind: 'pyannote', backend: 'pyannote.audio', source: 'huggingface', gated: true, bundle: true,

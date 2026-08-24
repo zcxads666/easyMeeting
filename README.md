@@ -57,7 +57,7 @@ Transformers/faster-whisper 本地 realtime 是带静音切分、overlap 和去�
 
 Qwen3-ASR 可以在 CPU 上运行，GPU 不是必需条件。Whisper 的 faster-whisper/CTranslate2 backend 不支持 MPS；Apple 设备可选择 Whisper CPU 或 Qwen MPS。
 
-模型默认优先从 ModelScope 下载（适合中国大陆网络），失败后自动切换 Hugging Face；也可用 `MEETING_MODEL_SOURCE=huggingface` 强制首选 Hugging Face。模型先下载到 `.downloads` 临时目录，通过关键文件和 JSON 配置校验后才写入 manifest 并转为 ready。中断下载可“继续/重试”；如果最终模型或临时目录已损坏，重试会先清理对应的坏缓存，避免反复复用缺失 `config.json` 的目录。
+模型默认优先从 ModelScope 下载（适合中国大陆网络），失败后自动切换 Hugging Face；也可用 `MEETING_MODEL_SOURCE=huggingface` 强制首选 Hugging Face。模型先下载到 `.downloads` 临时目录，通过关键文件和 JSON 配置校验后才写入 manifest 并转为 ready。中断下载可“继续/重试”；如果最终模型或临时目录已损坏，重试会先清理对应的坏缓存，避免反复复用缺失 `config.json` 的目录。ASR 模型下载并验证成功后，模型页会自动将它设为本地默认识别模型。
 
 ## Precise Timeline and Speakers
 
@@ -69,7 +69,7 @@ Speaker Diarization 是可选、本地、离线 post-processing，不参与实�
 
 ## Local Runtime
 
-官方桌面安装包内置基础 Python Runtime、PyTorch、faster-whisper、Transformers、ModelScope、Hugging Face Hub、FFmpeg 和 FFprobe，用户无需另装 Python/pip/FFmpeg；模型权重仍按需下载。Runtime 不会在应用普通启动时拉起，只有使用本地模型功能时才启动。Diarization、日/韩对齐依赖和 Linux CUDA vLLM 不进入标准包，后续由增强版安装包提供。详见 [Runtime 文档](docs/runtime.md)。
+官方桌面安装包内置基础 Python Runtime、PyTorch、faster-whisper、Transformers、ModelScope、Hugging Face Hub、FFmpeg 和 FFprobe，用户无需另装 Python/pip/FFmpeg；模型权重仍按需下载。新安装默认使用本地 Whisper tiny，下载模型后即可转写；Runtime 不会在应用普通启动时拉起，只有使用本地模型功能时才启动。Diarization、日/韩对齐依赖和 Linux CUDA vLLM 不进入标准包，后续由增强版安装包提供。详见 [Runtime 文档](docs/runtime.md)。
 
 支持并测试 Python 3.12；开发目标范围为 Python 3.10–3.12。该范围与当前 CI、Transformers 5.x、PyTorch 和 faster-whisper 依赖组合保持保守一致。
 
@@ -124,7 +124,7 @@ macOS 冒烟测试通过 Launch Services 打开 `.app`，避免在受限终端�
 
 ## Model Management and Benchmark
 
-模型页面提供下载、真实 byte progress（仓库能返回 total 时才显示百分比）、取消、继续/重试、验证、删除和性能测试。Benchmark 使用用户选择的已有会议音频，默认一次预热和一次测量，报告冷/热状态、加载时间、推理时间、RTF 和 realtime factor。结果受后台负载、散热及电源模式影响，不是硬件排名。
+模型页面提供下载、真实 byte progress（仓库能返回 total 时才显示百分比）、取消、继续/重试、验证、删除和性能测试。Benchmark 只取所选会议音频前 15 秒，默认一次预热和一次测量，显示加载/推理阶段、已用时间并支持取消，报告冷/热状态、加载时间、推理时间、RTF 和 realtime factor。结果受后台负载、散热及电源模式影响，不是硬件排名。
 
 ## Troubleshooting
 
@@ -141,6 +141,8 @@ macOS 冒烟测试通过 Launch Services 打开 `.app`，避免在受限终端�
 - **说话人分离授权失败**：先接受 Community-1 模型条款，保存 Hugging Face token 后重试下载。
 - **True Streaming 不可用**：这是能力结果而非故障；使用 Chunked 模式，或在支持的 Linux + CUDA 环境显式安装 vLLM feature。
 - **模型内存不足**：关闭占用显存/内存的任务、选择更小模型或显式选择 CPU；应用不会偷偷切换设备。
+- **性能测试长时间无反馈**：新版只测试前 15 秒，并显示加载/推理阶段和已用时间；仍需等待模型首次加载时可点击“取消”。
+- **模型和音频占用位置**：进入“设置 → 文件位置”选择模型安装目录及录音/转写文件目录，保存并重启后生效；已有文件不会自动移动。
 - **报告问题**：设置 → 诊断 → 导出诊断包。导出前仍建议快速检查文件内容。
 
 发布前请遵循 [Release Checklist](docs/release-checklist.md)。

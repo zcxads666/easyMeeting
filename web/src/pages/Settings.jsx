@@ -17,6 +17,7 @@ export default function Settings() {
   const [savedSection, setSavedSection] = useState('');
   const [diagnostics, setDiagnostics] = useState(null);
   const [diagnosticMsg, setDiagnosticMsg] = useState('');
+  const [storageMsg, setStorageMsg] = useState('');
 
   useEffect(() => { loadSettings().then(() => setForm(useStore.getState().settings)); }, []);
   useEffect(() => { setForm(settings); }, [settings]);
@@ -37,6 +38,25 @@ export default function Settings() {
     await saveSettings(form);
     setSavedSection('all');
     setTimeout(() => setSavedSection(''), 1500);
+  };
+
+  const chooseDirectory = async (key, title) => {
+    if (!window.meetingBridge?.selectDirectory) {
+      setStorageMsg('当前运行环境不支持原生目录选择，请直接输入绝对路径');
+      return;
+    }
+    try {
+      const selected = await window.meetingBridge.selectDirectory(title);
+      if (selected) set('storage', key, selected);
+    } catch (e) { setStorageMsg('选择目录失败：' + e.message); }
+  };
+
+  const saveStorage = async (restart = false) => {
+    try {
+      await saveSection('storage');
+      setStorageMsg(restart ? '已保存，应用即将重启…' : '已保存；重启应用后生效');
+      if (restart) setTimeout(() => window.meetingBridge?.restart(), 250);
+    } catch (e) { setStorageMsg('保存失败：' + e.message); }
   };
 
   const testLLM = async () => {
@@ -118,6 +138,34 @@ export default function Settings() {
           <div className="flex items-center justify-between"><span className="text-sm">转写后自动精确对齐</span><Toggle checked={form.postProcessing.autoAlign} onChange={(value) => set('postProcessing', 'autoAlign', value)} /></div>
           <div className="flex items-center justify-between"><span className="text-sm">转写后自动说话人分离</span><Toggle checked={form.postProcessing.autoDiarize} onChange={(value) => set('postProcessing', 'autoDiarize', value)} /></div>
           <button className="btn-primary" onClick={() => saveAll()}>保存高级设置</button>
+        </div>
+      </section>
+
+      {/* 文件位置 */}
+      <section className="card p-6 mb-6">
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="font-semibold">文件位置</h2>
+          {savedSection === 'storage' && <span className="text-xs text-green-600">✓ 已保存</span>}
+        </div>
+        <p className="text-sm text-gray-400 dark:text-gray-500 mb-4">模型安装目录和录音/转写临时文件目录。修改后需要重启应用；已有文件不会自动移动。</p>
+        <div className="space-y-4">
+          <Field label="模型安装位置" hint="建议选择空间充足的本地磁盘">
+            <div className="flex gap-2">
+              <input className="input flex-1" value={form.storage?.modelsDir || ''} onChange={(e) => set('storage', 'modelsDir', e.target.value)} placeholder="例如 /Users/你的用户名/.meeting/models" />
+              <button className="btn-secondary shrink-0" onClick={() => chooseDirectory('modelsDir', '选择模型安装目录')}>选择目录</button>
+            </div>
+          </Field>
+          <Field label="录音与转写文件位置" hint="会议音频、PCM 中间文件和上传文件">
+            <div className="flex gap-2">
+              <input className="input flex-1" value={form.storage?.mediaDir || ''} onChange={(e) => set('storage', 'mediaDir', e.target.value)} placeholder="例如 /Users/你的用户名/Documents/MeetingNotes" />
+              <button className="btn-secondary shrink-0" onClick={() => chooseDirectory('mediaDir', '选择录音与转写文件目录')}>选择目录</button>
+            </div>
+          </Field>
+          <div className="flex items-center gap-3">
+            <button className="btn-primary" onClick={() => saveStorage(false)}>保存文件位置</button>
+            <button className="btn-secondary" onClick={() => saveStorage(true)}>保存并重启</button>
+            {storageMsg && <span className="text-sm text-gray-500 dark:text-gray-400">{storageMsg}</span>}
+          </div>
         </div>
       </section>
 

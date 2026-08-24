@@ -31,7 +31,9 @@ Runtime 与模型状态独立：Runtime broken 时 Node 仍可扫描模型目录
 
 ASR 内部时间单位统一为秒。无法取得时间戳时必须为 `start/end: null, timing: unknown`；本地 realtime 的窗口时间来自 PCM sample offset，标记为 `estimated`。
 
-Benchmark 使用任务 API 返回，Python 将模型加载和推理分别计时。`RTF = inference/audio`，`realtimeFactor = audio/inference`。
+Benchmark 使用任务 API 返回，服务端只转码并测试所选音频的前 15 秒；任务提供阶段心跳、取消和 10 分钟超时，Python 将模型加载和推理分别计时。`RTF = inference/audio`，`realtimeFactor = audio/inference`。下载并验证成功的 ASR 模型由模型页自动写入本地默认设置。
+
+用户可在设置中选择独立的模型目录和录音/转写媒体目录。路径写入 settings，Electron 重启时在加载 Node/Python 服务前注入 `MEETING_MODELS_DIR`、`MEETING_MEDIA_DIR`；已有文件不会自动迁移。
 
 ## Advanced meeting pipeline
 

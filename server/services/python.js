@@ -5,7 +5,7 @@ import { accessSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import os from 'node:os';
-import { ROOT, PYTHON_PORT, DATA_DIR } from '../config.js';
+import { ROOT, PYTHON_PORT, DATA_DIR, MODELS_DIR, MEDIA_DIR } from '../config.js';
 import { createLogger } from './logger.js';
 
 const execFileAsync = promisify(execFile);
@@ -206,7 +206,13 @@ async function launch() {
   logger.info('launching runtime', { bundled: Boolean(bundled), executable: path.basename(command) });
   child = spawn(command, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
-    env: { ...process.env, MEETING_PY_PORT: String(pyPort), MEETING_DATA_DIR: DATA_DIR }
+    env: {
+      ...process.env,
+      MEETING_PY_PORT: String(pyPort),
+      MEETING_DATA_DIR: DATA_DIR,
+      MEETING_MODELS_DIR: MODELS_DIR,
+      MEETING_MEDIA_DIR: MEDIA_DIR
+    }
   });
   child.stdout.on('data', (d) => process.stdout.write(`[python] ${d}`));
   child.stderr.on('data', (d) => process.stderr.write(`[python:err] ${d}`));

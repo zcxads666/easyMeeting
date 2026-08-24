@@ -34,13 +34,15 @@ export async function probe(filePath) {
   return JSON.parse(stdout);
 }
 
-export async function transcodeToPcm(filePath, outName) {
+export async function transcodeToPcm(filePath, outName, { durationSeconds = null } = {}) {
   const out = path.join(UPLOADS_DIR, outName);
-  await execFileAsync(FFMPEG_BIN, [
+  const args = [
     '-y', '-i', filePath,
+    ...(Number.isFinite(durationSeconds) && durationSeconds > 0 ? ['-t', String(durationSeconds)] : []),
     '-ar', '16000', '-ac', '1', '-acodec', 'pcm_s16le',
     '-f', 's16le', out
-  ]);
+  ];
+  await execFileAsync(FFMPEG_BIN, args);
   return out;
 }
 

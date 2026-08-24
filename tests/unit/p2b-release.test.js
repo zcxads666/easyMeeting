@@ -20,12 +20,24 @@ test('lazyRouter 只在首次请求加载模块并复用 Router', async () => {
   assert.equal(loads, 1); assert.equal(calls, 2);
 });
 
-test('Models UI 覆盖 lifecycle、真实 progress 和 benchmark 状态', async () => {
+test('Models UI 覆盖 lifecycle、真实 progress、benchmark 取消和自动切换', async () => {
   const source = await fsp.readFile('web/src/pages/Models.jsx', 'utf8');
   for (const state of ['not_installed', 'checking', 'queued', 'downloading', 'verifying', 'ready', 'cancelled', 'broken', 'deleting', 'error']) assert.match(source, new RegExp(state));
   assert.match(source, /downloadedBytes/); assert.match(source, /speedBytesPerSecond/);
   assert.match(source, /modelLoadMs/); assert.match(source, /realtimeFactor/); assert.match(source, /性能测试/);
+  assert.match(source, /onCancelBenchmark/); assert.match(source, /provider: 'local'/); assert.match(source, /自动切换/);
   assert.doesNotMatch(source, /width:\s*dlStatus[^\n]*40%/, '不得保留伪造 40% 下载进度');
+});
+
+test('benchmark 只处理短音频并提供心跳/超时，避免长时间无反馈', async () => {
+  const [route, python] = await Promise.all([
+    fsp.readFile('server/routes/models.js', 'utf8'), fsp.readFile('python/main.py', 'utf8')
+  ]);
+  assert.match(route, /BENCHMARK_MAX_SECONDS = 15/);
+  assert.match(route, /durationSeconds: BENCHMARK_MAX_SECONDS/);
+  assert.match(route, /setInterval\(\(\) =>/);
+  assert.match(route, /10 \* 60 \* 1000/);
+  assert.match(python, /BENCHMARK_MAX_SECONDS = 15/);
 });
 
 test('Python test runner 明确选择项目 venv 的跨平台路径', async () => {
@@ -37,15 +49,17 @@ test('Python test runner 明确选择项目 venv 的跨平台路径', async () =
 });
 
 test('桌面包强制构建并加载离线 Runtime 与媒体工具', async () => {
-  const [pkg, main, pythonService, artifactHook] = await Promise.all([
+  const [pkg, main, pythonService, artifactHook, desktopBuild] = await Promise.all([
     fsp.readFile('package.json', 'utf8'), fsp.readFile('electron/main.js', 'utf8'),
-    fsp.readFile('server/services/python.js', 'utf8'), fsp.readFile('scripts/artifact-build-completed.cjs', 'utf8')
+    fsp.readFile('server/services/python.js', 'utf8'), fsp.readFile('scripts/artifact-build-completed.cjs', 'utf8'),
+    fsp.readFile('scripts/build-desktop.mjs', 'utf8')
   ]);
-  assert.match(pkg, /npm run build:runtime && electron-builder/);
+  assert.match(pkg, /npm run build:runtime && node scripts\/build-desktop\.mjs/);
   for (const resource of ['runtime/meeting-runtime', 'tools/ffmpeg', 'tools/ffprobe']) assert.match(pkg, new RegExp(resource));
   assert.match(main, /MEETING_BUNDLED_RUNTIME_DIR/); assert.match(main, /FFMPEG_PATH/); assert.match(main, /FFPROBE_PATH/);
   assert.match(pythonService, /BUNDLED_RUNTIME_EXECUTABLE/); assert.match(pythonService, /RUNTIME_BUNDLED_FEATURE_UNAVAILABLE/);
   assert.match(pkg, /artifact-build-completed\.cjs/); assert.match(artifactHook, /ditto/); assert.match(artifactHook, /buildBlockMap/);
+  assert.match(desktopBuild, /hdiutil/); assert.match(desktopBuild, /verbatimSymlinks/); assert.match(desktopBuild, /MEETING_RUNTIME_VERIFY_ONLY/);
 });
 
 test('package verifier 接受内置 Runtime/FFmpeg 的完整包并拒绝用户 settings', async () => {

@@ -1,4 +1,4 @@
-import { app, BrowserWindow, shell, dialog, safeStorage } from 'electron';
+import { app, BrowserWindow, shell, dialog, safeStorage, ipcMain } from 'electron';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -49,6 +49,39 @@ function writeSmokeMarker(status, context = {}) {
   }
 }
 
+function applyPersistedStoragePaths() {
+  const defaultDataRoot = isDev ? path.join(__dirname, '..', 'data') : path.join(app.getPath('userData'), 'data');
+  const dataRoot = path.resolve(process.env.MEETING_DATA_DIR || defaultDataRoot);
+  const settingsFile = path.join(dataRoot, 'settings.json');
+  try {
+    const saved = JSON.parse(fs.readFileSync(settingsFile, 'utf8'));
+    const storage = saved?.storage || {};
+    if (typeof storage.modelsDir === 'string' && storage.modelsDir.trim()) {
+      process.env.MEETING_MODELS_DIR = path.resolve(storage.modelsDir);
+    }
+    if (typeof storage.mediaDir === 'string' && storage.mediaDir.trim()) {
+      process.env.MEETING_MEDIA_DIR = path.resolve(storage.mediaDir);
+    }
+  } catch {
+    // 首次启动或旧版设置不存在时使用默认路径。
+  }
+}
+
+function registerDesktopIpc() {
+  ipcMain.handle('select-directory', async (_event, options = {}) => {
+    const result = await dialog.showOpenDialog(mainWindow || undefined, {
+      title: typeof options.title === 'string' ? options.title : '选择文件夹',
+      properties: ['openDirectory', 'createDirectory']
+    });
+    return result.canceled ? null : result.filePaths[0] || null;
+  });
+  ipcMain.handle('restart-app', () => {
+    app.relaunch();
+    app.exit(0);
+    return true;
+  });
+}
+
 markStartup('process-started', { packaged: !isDev });
 
 // 全局错误兜底：防止主进程未捕获异常导致静默崩溃
@@ -93,6 +126,8 @@ async function bootstrap() {
     process.env.FFMPEG_PATH ||= path.join(process.resourcesPath, 'tools', 'ffmpeg', `ffmpeg${executableSuffix}`);
     process.env.FFPROBE_PATH ||= path.join(process.resourcesPath, 'tools', 'ffprobe', `ffprobe${executableSuffix}`);
   }
+  applyPersistedStoragePaths();
+  registerDesktopIpc();
 
   // 动态 import：确保上面环境变量设置先于 server 模块加载
   const { createServer } = await import('../server/index.js');

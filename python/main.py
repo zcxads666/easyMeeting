@@ -18,6 +18,7 @@ import runtime
 
 app = FastAPI(title="Meeting Local Inference")
 _inference_lock = threading.RLock()
+BENCHMARK_MAX_SECONDS = 15
 
 
 def _prepare_workload(kind, request=None):
@@ -175,6 +176,10 @@ async def delete_model(model_id: str):
 @serialized_inference("benchmark")
 def benchmark(req: BenchmarkReq):
     pcm = _read_uploads_file(req.file)
+    # 性能测试只取前 15 秒代表性音频，避免把整场会议送入模型后长时间没有反馈。
+    max_bytes = BENCHMARK_MAX_SECONDS * 16000 * 2
+    if len(pcm) > max_bytes:
+        pcm = pcm[:max_bytes]
     try:
         state = model_manager.verify_model(req.id)
         if state["status"] != "ready": raise model_manager.ModelLifecycleError("MODEL_NOT_READY", "模型尚未就绪", status=state["status"])
@@ -251,7 +256,8 @@ def _read_uploads_file(file_path: str) -> bytes:
     data_dir = os.environ.get("MEETING_DATA_DIR")
     if not data_dir:
         raise HTTPException(status_code=400, detail="未配置数据目录，拒绝读取本地文件")
-    root = (Path(data_dir) / "uploads").resolve()
+    media_dir = os.environ.get("MEETING_MEDIA_DIR")
+    root = Path(media_dir).resolve() if media_dir else (Path(data_dir) / "uploads").resolve()
     p = Path(file_path).resolve()
     try:
         p.relative_to(root)

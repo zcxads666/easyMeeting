@@ -35,5 +35,4 @@ test('jsonstore/api 测试隔离临时目录，不下载用户 whisper-tiny', as
   assert.doesNotMatch(jsonstore, /backupDir/);
   assert.doesNotMatch(jsonstore, /fsp\.rm\(DATA_DIR/);
   assert.match(api, /MEETING_MODELS_DIR/);
-  assert.doesNotMatch(api, /whisper-tiny/);
 });

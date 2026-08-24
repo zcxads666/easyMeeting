@@ -105,6 +105,7 @@ test('验收1c: 实时转写 Socket.IO 全链路（mock 千问流）', async () 
   // 使用 socket.io-client 验证 rt:start / rt:audio / rt:stop 协议
   const { io } = await import('socket.io-client');
   const { data: m } = await api('POST', '/api/meetings', { title: '实时链路' });
+  await api('PATCH', '/api/settings', { asr: { provider: 'qwen' } });
 
   const socket = io(`http://127.0.0.1:${PORT}`, {
     transports: ['websocket'],
@@ -112,26 +113,30 @@ test('验收1c: 实时转写 Socket.IO 全链路（mock 千问流）', async () 
     auth: { token: API_TOKEN }
   });
   const received = [];
-  await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('连接超时')), 5000);
-    socket.on('connect', () => { clearTimeout(timer); resolve(); });
-    socket.on('connect_error', (e) => { clearTimeout(timer); reject(e); });
-  });
+  try {
+    await new Promise((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('连接超时')), 5000);
+      socket.on('connect', () => { clearTimeout(timer); resolve(); });
+      socket.on('connect_error', (e) => { clearTimeout(timer); reject(e); });
+    });
 
-  // 未配置 qwen key 时 rt:start 应返回错误（不崩溃）
-  const errMsg = await new Promise((resolve) => {
-    socket.on('rt:error', ({ error }) => resolve(error));
-    socket.emit('rt:start', { meetingId: m.id });
-    setTimeout(() => resolve('TIMEOUT'), 3000);
-  });
-  assert.match(errMsg, /千问|已有/);
+    // 未配置 qwen key 时 rt:start 应返回错误（不崩溃）
+    const errMsg = await new Promise((resolve) => {
+      const timer = setTimeout(() => resolve('TIMEOUT'), 3000);
+      socket.on('rt:error', ({ error }) => { clearTimeout(timer); resolve(error); });
+      socket.emit('rt:start', { meetingId: m.id });
+    });
+    assert.match(errMsg, /千问|已有/);
 
-  // 发一段音频帧不应崩溃
-  socket.emit('rt:audio', { meetingId: m.id, data: Buffer.alloc(3200).toString('base64') });
-  socket.emit('rt:stop', { meetingId: m.id });
-  await sleep(300);
-  socket.close();
-  await api('DELETE', `/api/meetings/${m.id}`);
+    // 发一段音频帧不应崩溃
+    socket.emit('rt:audio', { meetingId: m.id, data: Buffer.alloc(3200).toString('base64') });
+    socket.emit('rt:stop', { meetingId: m.id });
+    await sleep(300);
+  } finally {
+    socket.close();
+    await api('DELETE', `/api/meetings/${m.id}`);
+    await api('PATCH', '/api/settings', { asr: { provider: 'local' } });
+  }
 });
 
 test('验收1d: 文件转写上传（不支持格式应 400）', async () => {
@@ -158,7 +163,9 @@ test('验收1d: 文件转写上传（不支持格式应 400）', async () => {
 
 test('验收2: 设置读写 + provider 切换持久化', async () => {
   const { data: s } = await api('GET', '/api/settings');
-  assert.equal(s.asr.provider, 'qwen');
+  assert.equal(s.asr.provider, 'local');
+  assert.equal(s.asr.local.model, 'whisper-tiny');
+  assert.ok(s.storage.modelsDir && s.storage.mediaDir);
   assert.ok(s.llm && s.asr.qwen && s.asr.volc && s.asr.mimo && s.asr.local);
 
   const { data: saved } = await api('PATCH', '/api/settings', { asr: { provider: 'local' } });
@@ -223,7 +230,7 @@ test('验收3: 模型代理路由（不下载真实模型）', async () => {
   const qwen = data.models.find((m) => m.id === 'Qwen/Qwen3-ASR-0.6B-hf');
   assert.ok(qwen);
   assert.equal(qwen.backend, 'transformers');
-  assert.equal(qwen.source, 'huggingface');
+  assert.equal(qwen.source, 'modelscope');
   assert.ok(qwen.supportedDevices.includes('cpu'));
 
   const { res: r2, data: d2 } = await api('POST', '/api/models/download', { id: 'not-a-real-model' });

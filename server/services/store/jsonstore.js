@@ -182,7 +182,8 @@ export async function getSettings() {
     diarization: { ...DEFAULT_SETTINGS.diarization, ...(saved.diarization || {}) },
     postProcessing: { ...DEFAULT_SETTINGS.postProcessing, ...(saved.postProcessing || {}) },
     realtime: { ...DEFAULT_SETTINGS.realtime, ...(saved.realtime || {}) },
-    ui: { ...DEFAULT_SETTINGS.ui, ...(saved.ui || {}) }
+    ui: { ...DEFAULT_SETTINGS.ui, ...(saved.ui || {}) },
+    storage: { ...DEFAULT_SETTINGS.storage, ...(saved.storage || {}) }
   };
   const secretStore = getSecretStore();
   if (secretStore) {
@@ -195,7 +196,7 @@ export async function getSettings() {
       if (envValue) setPath(merged, secretPath, envValue);
     }
   }
-  merged.schemaVersion = 4;
+  merged.schemaVersion = 5;
   return merged;
 }
 
@@ -231,14 +232,15 @@ export async function saveSettings(patch) {
     diarization: { ...current.diarization, ...(patch.diarization || {}) },
     postProcessing: { ...current.postProcessing, ...(patch.postProcessing || {}) },
     realtime: { ...current.realtime, ...(patch.realtime || {}) },
-    ui: { ...current.ui, ...(patch.ui || {}) }
+    ui: { ...current.ui, ...(patch.ui || {}) },
+    storage: { ...current.storage, ...(patch.storage || {}) }
   };
   next.llm.apiKey = resolveSecretUpdate(current.llm.apiKey, patch.llm?.apiKey);
   next.asr.qwen.apiKey = resolveSecretUpdate(current.asr.qwen.apiKey, patch.asr?.qwen?.apiKey);
   next.asr.mimo.apiKey = resolveSecretUpdate(current.asr.mimo.apiKey, patch.asr?.mimo?.apiKey);
   next.asr.volc.token = resolveSecretUpdate(current.asr.volc.token, patch.asr?.volc?.token);
   next.huggingFace.token = resolveSecretUpdate(current.huggingFace.token, patch.huggingFace?.token);
-  next.schemaVersion = 4;
+  next.schemaVersion = 5;
   const secretStore = getSecretStore();
   if (secretStore) {
     for (const secretPath of SECRET_PATHS) {

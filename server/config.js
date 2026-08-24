@@ -10,7 +10,11 @@ export const DATA_DIR = process.env.MEETING_DATA_DIR
   ? path.resolve(process.env.MEETING_DATA_DIR)
   : path.join(ROOT, 'data');
 export const MEETINGS_DIR = path.join(DATA_DIR, 'meetings');
-export const UPLOADS_DIR = path.join(DATA_DIR, 'uploads');
+// 录音、转写中间文件和媒体附件可放到独立磁盘；默认仍位于 data/uploads。
+export const MEDIA_DIR = process.env.MEETING_MEDIA_DIR
+  ? path.resolve(process.env.MEETING_MEDIA_DIR)
+  : path.join(DATA_DIR, 'uploads');
+export const UPLOADS_DIR = MEDIA_DIR;
 export const TRASH_DIR = path.join(DATA_DIR, 'trash');
 export const SETTINGS_FILE = path.join(DATA_DIR, 'settings.json');
 export const LOGS_DIR = process.env.MEETING_LOG_DIR ? path.resolve(process.env.MEETING_LOG_DIR) : path.join(DATA_DIR, 'logs');
@@ -28,15 +32,15 @@ export const PORT = process.env.PORT || 3000;
 export const BIND_HOST = process.env.MEETING_BIND_HOST || '127.0.0.1';
 
 export const DEFAULT_SETTINGS = {
-  schemaVersion: 4,
+  schemaVersion: 5,
   secretMigrationVersion: 0,
   llm: { baseUrl: '', apiKey: '', model: '', temperature: 0.3 },
   asr: {
-    provider: 'qwen',
+    provider: 'local',
     qwen: { apiKey: '', model: 'qwen3-asr-flash' },
     volc: { appid: '', token: '', cluster: 'volcengine_input_common' },
     mimo: { apiKey: '', model: 'mimo-v2.5-asr' },
-    local: { engine: 'whisper', model: 'whisper-large-v3', device: 'auto' }
+    local: { engine: 'whisper', model: 'whisper-tiny', device: 'auto' }
   },
   correction: { enabled: true },
   huggingFace: { token: '' },
@@ -44,5 +48,6 @@ export const DEFAULT_SETTINGS = {
   diarization: { model: 'pyannote/speaker-diarization-community-1', device: 'auto', numSpeakers: null, minSpeakers: null, maxSpeakers: null },
   postProcessing: { autoAlign: false, autoDiarize: false },
   realtime: { mode: 'auto' },
-  ui: { theme: 'light' }
+  ui: { theme: 'light' },
+  storage: { modelsDir: MODELS_DIR, mediaDir: MEDIA_DIR }
 };

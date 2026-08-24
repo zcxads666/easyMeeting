@@ -75,7 +75,7 @@ export async function migratePlaintextSecrets(settings, store, persist) {
   }
   const sanitized = structuredClone(settings);
   for (const secretPath of SECRET_PATHS) setPath(sanitized, secretPath, '');
-  sanitized.schemaVersion = 4; sanitized.secretMigrationVersion = 1;
+  sanitized.schemaVersion = 5; sanitized.secretMigrationVersion = 1;
   await persist(sanitized);
   return sanitized;
 }

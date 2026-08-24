@@ -1,6 +1,6 @@
 # Local AI Runtime
 
-桌面 App、AI Runtime、模型文件、会议数据和日志使用独立目录。打包应用不会写 `app.asar` 或 Program Files。
+桌面 App、AI Runtime、模型文件、会议数据和日志使用独立目录。设置页还可选择模型目录和录音/转写媒体目录；保存后重启应用生效。打包应用不会写 `app.asar` 或 Program Files。
 
 官方桌面安装包内置按平台原生构建的基础 Runtime（PyTorch、Transformers、faster-whisper、ModelScope 和 Hugging Face Hub）以及 FFmpeg/FFprobe，普通用户不需要安装 Python、pip 或 FFmpeg。Runtime 以 PyInstaller onedir 形式位于应用 resources 目录，模型权重仍保存在用户数据目录并按需下载。模型默认优先使用 ModelScope，失败后回退 Hugging Face；连接和下载超时由 Runtime 控制。开发模式继续使用项目 venv。
 

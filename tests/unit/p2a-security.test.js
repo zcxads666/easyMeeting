@@ -25,11 +25,13 @@ test('SecretStore save/load/clear 与加密文件不含明文', async () => {
 
 test('settings migration 保留旧值并严格验证 patch', () => {
   const migrated = migrateSettings({ llm: { model: 'old-model' }, asr: { local: { engine: 'whisper' } } });
-  assert.equal(migrated.schemaVersion, 4); assert.equal(migrated.llm.model, 'old-model'); assert.equal(migrated.asr.local.device, 'auto');
+  assert.equal(migrated.schemaVersion, 5); assert.equal(migrated.llm.model, 'old-model'); assert.equal(migrated.asr.local.device, 'auto');
   assert.throws(() => migrateSettings({ schemaVersion: 99 }), /不支持/);
   assert.throws(() => validateSettingsPatch({ asr: { provider: 'evil' } }), /provider/);
   assert.throws(() => validateSettingsPatch(JSON.parse('{"__proto__":{"polluted":true}}')), /未知/);
   assert.throws(() => validateSettingsPatch({ llm: { baseUrl: 'file:///etc/passwd' } }), /http/);
+  assert.doesNotThrow(() => validateSettingsPatch({ storage: { modelsDir: '/tmp/models', mediaDir: '/tmp/media' } }));
+  assert.throws(() => validateSettingsPatch({ storage: { modelsDir: 'relative/models' } }), /绝对路径/);
   assert.doesNotThrow(() => validateSettingsPatch({ llm: { temperature: 1.2 }, asr: { local: { device: 'cpu' } } }));
 });
 
@@ -74,7 +76,9 @@ test('Electron 主窗口保持隔离、sandbox 和窄 preload surface', async ()
   assert.match(main, /show:\s*false/); assert.match(main, /ready-to-show/); assert.match(main, /createSplashWindow/);
   assert.doesNotMatch(main, /\.spawnPython\(/, '桌面普通启动不得自动拉起 Python Runtime');
   assert.doesNotMatch(preload, /\brequire\(['"](?:fs|child_process)['"]\)/);
-  assert.doesNotMatch(preload, /ipcRenderer|shell|webFrame/);
+  assert.match(preload, /ipcRenderer\.invoke\('select-directory'/);
+  assert.match(preload, /ipcRenderer\.invoke\('restart-app'/);
+  assert.doesNotMatch(preload, /require\(['"](?:fs|child_process|shell|webFrame)['"]\)/);
   assert.match(html, /Content-Security-Policy/); assert.doesNotMatch(html, /script-src[^;]*\*/);
   assert.doesNotMatch(html, /frame-ancestors/, 'meta CSP 不支持 frame-ancestors');
 });

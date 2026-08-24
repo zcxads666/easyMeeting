@@ -49,7 +49,7 @@ test('diarization task 保存 regular/exclusive turns 和 attribution quality', 
 
 test('settings v3→v4 migration 增加 optional features 且不丢原值', () => {
   const value = migrateSettings({ schemaVersion: 3, llm: { model: 'old' } });
-  assert.equal(value.schemaVersion, 4); assert.equal(value.llm.model, 'old');
+  assert.equal(value.schemaVersion, 5); assert.equal(value.llm.model, 'old');
   assert.equal(value.postProcessing.autoDiarize, false); assert.equal(value.realtime.mode, 'auto');
 });
 

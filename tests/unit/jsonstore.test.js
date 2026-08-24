@@ -91,7 +91,9 @@ test('readJson 损坏文件返回 fallback', async () => {
 test('设置：默认值与合并', async () => {
   const defaults = await getSettings();
   assert.deepEqual(defaults.llm, DEFAULT_SETTINGS.llm);
-  assert.equal(defaults.asr.provider, 'qwen');
+  assert.equal(defaults.asr.provider, 'local');
+  assert.equal(defaults.asr.local.model, 'whisper-tiny');
+  assert.ok(defaults.storage.modelsDir && defaults.storage.mediaDir);
   assert.deepEqual(defaults.asr.local, DEFAULT_SETTINGS.asr.local);
 
   const saved = await saveSettings({ llm: { model: 'gpt-test' }, asr: { provider: 'local' } });
