@@ -140,17 +140,20 @@ jobs:
           HAS_NOTARIZATION: ${{ runner.os != 'macOS' || (secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '') }}
         run: node -e "if(process.env.HAS_SIGNING_CERT!=='true'||process.env.HAS_NOTARIZATION!=='true') throw new Error('Tagged desktop releases require platform signing and macOS notarization secrets')"
 
+      - name: Build compiled Python Runtime
+        run: npm run build:runtime
+
       - name: Package Windows
         if: runner.os == 'Windows'
-        run: npm run desktop:dist -- --win nsis --publish never
+        run: node scripts/build-desktop.mjs --win nsis --publish never
 
       - name: Package macOS
         if: runner.os == 'macOS'
-        run: npm run desktop:dist -- --mac dmg zip --publish never
+        run: node scripts/build-desktop.mjs --mac dmg zip --publish never
 
       - name: Package Linux
         if: runner.os == 'Linux'
-        run: npm run desktop:dist -- --linux AppImage --publish never
+        run: node scripts/build-desktop.mjs --linux AppImage --publish never
 
       - name: Packaged startup smoke (Windows)
         if: runner.os == 'Windows'
@@ -220,8 +223,11 @@ jobs:
       - name: Build web renderer
         run: npm run build
 
+      - name: Build compiled Python Runtime
+        run: npm run build:runtime
+
       - name: Package macOS with compiled Runtime
-        run: npm run desktop:dist -- --mac dmg zip --publish never
+        run: node scripts/build-desktop.mjs --mac dmg zip --publish never
 
       - name: Packaged startup smoke
         run: npm run test:startup -- release/desktop
