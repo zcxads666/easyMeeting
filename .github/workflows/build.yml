@@ -66,9 +66,7 @@ jobs:
   package:
     name: Package ${{ matrix.name }}
     needs: quality
-    # Pull requests must exercise the macOS installer path; pushes/tags keep
-    # the full Windows/macOS/Linux matrix for release coverage.
-    if: github.event_name != 'pull_request' || matrix.name == 'macOS'
+    if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 120
     env:
@@ -183,3 +181,62 @@ jobs:
           if-no-files-found: error
           compression-level: 0
           retention-days: 14
+
+  package-macos-pr:
+    name: Package macOS (pull request)
+    needs: quality
+    if: github.event_name == 'pull_request'
+    runs-on: macos-15
+    timeout-minutes: 120
+    env:
+      CI: "true"
+      MEETING_RUNTIME_AUTO_INSTALL: "0"
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v7
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v7
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            python/requirements.txt
+            python/requirements-build.txt
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build offline Python Runtime prerequisites
+        run: npm run setup:runtime-build
+
+      - name: Build web renderer
+        run: npm run build
+
+      - name: Package macOS with compiled Runtime
+        run: npm run desktop:dist -- --mac dmg zip --publish never
+
+      - name: Packaged startup smoke
+        run: npm run test:startup -- release/desktop
+
+      - name: Verify package contents
+        run: npm run verify:package
+
+      - name: Upload macOS PR installers
+        uses: actions/upload-artifact@v6
+        with:
+          name: MeetingNotes-macOS-PR
+          path: |
+            release/desktop/*.dmg
+            release/desktop/*.zip
+            release/desktop/*.blockmap
+          if-no-files-found: error
+          compression-level: 0
+          retention-days: 7
