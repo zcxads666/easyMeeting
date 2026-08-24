@@ -218,7 +218,7 @@ def download(model_id, destination=None, cancel_event=None, token=None):
     else:
         try: from huggingface_hub import snapshot_download
         except ImportError as exc: raise RuntimeError("缺少依赖 huggingface_hub") from exc
-        snapshot_download(repo_id=repository, local_dir=str(destination), local_dir_use_symlinks=False,
+        snapshot_download(repo_id=repository, local_dir=str(destination),
                           tqdm_class=_cancel_tqdm(cancel_event), token=token)
     if cancel_event and cancel_event.is_set(): raise InterruptedError("模型下载已取消")
     return destination

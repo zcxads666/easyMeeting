@@ -42,8 +42,9 @@ async function restoreMacTorchBinaries(python) {
       else if (entry.name.endsWith('.dylib') || entry.name.endsWith('.so')) {
         const target = path.join(targetRoot, child);
         try { await access(target); } catch { continue; }
+        // Keep the original linker signature. Re-signing libtorch_cpu.dylib with
+        // an ad-hoc signature makes its static initializer trap on macOS arm64.
         await copyFile(path.join(sourceRoot, child), target);
-        await run('codesign', ['--force', '--sign', '-', target]);
         restored.push(child);
       }
     }
