@@ -120,6 +120,7 @@ npm run test:startup -- release/desktop
 桌面端会先显示轻量启动页，主窗口完成首帧后再切换；启动日志包含各阶段毫秒耗时。正式 tag 发布要求配置
 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`、`MACOS_CSC_LINK` / `MACOS_CSC_KEY_PASSWORD`，以及 macOS 公证所需的
 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` GitHub Actions secrets；缺失时 tag 构建会失败，避免发布未签名安装包。
+macOS 冒烟测试通过 Launch Services 打开 `.app`，避免在受限终端中直接执行 AppKit 二进制；手工测试请把 DMG 中的应用拖到 Applications 后从 Finder 启动。
 
 ## Model Management and Benchmark
 
@@ -127,8 +128,8 @@ npm run test:startup -- release/desktop
 
 ## Troubleshooting
 
-- **Runtime 未安装/损坏**：在模型页选择“安装”或“修复”；失败后导出诊断包。
-- **FFmpeg missing**：安装 FFmpeg 并确认 `ffmpeg`、`ffprobe` 在 PATH，或配置对应环境变量。
+- **Runtime 未安装/损坏**：官方桌面包已内置基础 Runtime；在模型页选择“诊断/修复”，失败后导出诊断包。
+- **FFmpeg missing**：官方桌面包已内置 FFmpeg/FFprobe；若诊断仍显示缺失，导出诊断包确认应用包是否完整。
 - **模型 broken**：先“验证”；关键文件不完整时选择“继续/重试”，应用不会自动删除旧文件。
 - **磁盘空间不足**：清理模型目录所在磁盘；下载前会按预估模型大小加安全余量检查。
 - **CUDA unavailable**：确认 PyTorch/CTranslate2 和驱动组合支持当前 CUDA；显式选择 CUDA 不会静默回退 CPU。

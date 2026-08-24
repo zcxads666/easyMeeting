@@ -13,7 +13,7 @@ npm run setup:python
 npm run test:python
 ```
 
-测试 runner 在 Windows 使用 `python/.venv/Scripts/python.exe`，在 macOS/Linux 使用 `python/.venv/bin/python`。Runtime health 区分 daemon、依赖、FFmpeg 和 model runtime；FFmpeg 不由当前安装器自动捆绑。
+测试 runner 在 Windows 使用 `python/.venv/Scripts/python.exe`，在 macOS/Linux 使用 `python/.venv/bin/python`。Runtime health 区分 daemon、依赖、FFmpeg 和 model runtime；官方桌面包直接使用 resources 中捆绑的 FFmpeg/FFprobe。
 
 ## Optional feature packs
 

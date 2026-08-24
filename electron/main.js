@@ -6,6 +6,7 @@ import { isAllowedRendererNavigation, isSafeExternalUrl } from './security.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.argv.includes('--dev');
+const smokeTest = process.env.ELECTRON_SMOKE_TEST === '1' || process.argv.includes('--smoke-test');
 const startupStartedAt = performance.now();
 
 if (process.env.MEETING_USER_DATA_DIR) {
@@ -27,6 +28,25 @@ function markStartup(stage, context = {}) {
   console.log(`[startup] ${stage} +${elapsedMs}ms`);
   electronLogger?.info('startup milestone', payload);
   return payload;
+}
+
+function smokeMarkerPath() {
+  const fromEnv = process.env.ELECTRON_SMOKE_MARKER;
+  if (fromEnv) return fromEnv;
+  const fromArg = process.argv.find((arg) => arg.startsWith('--smoke-marker='));
+  return fromArg ? fromArg.slice('--smoke-marker='.length) : null;
+}
+
+function writeSmokeMarker(status, context = {}) {
+  if (!smokeTest) return;
+  const marker = smokeMarkerPath();
+  if (!marker) return;
+  try {
+    fs.mkdirSync(path.dirname(marker), { recursive: true });
+    fs.writeFileSync(marker, JSON.stringify({ status, ...context }), 'utf8');
+  } catch (error) {
+    console.error('[smoke] marker write failed:', error.message);
+  }
 }
 
 markStartup('process-started', { packaged: !isDev });
@@ -192,8 +212,8 @@ function createWindow() {
     mainWindow = null;
   });
 
-  // 冒烟测试：ELECTRON_SMOKE_TEST=1 时加载完成后自动退出（验证迁移链路）
-  if (process.env.ELECTRON_SMOKE_TEST === '1') {
+  // 冒烟测试：支持环境变量和命令行参数，macOS 可通过 Launch Services 启动。
+  if (smokeTest) {
     mainWindow.webContents.once('did-finish-load', async () => {
       console.log('[smoke] window loaded');
       try {
@@ -219,18 +239,22 @@ function createWindow() {
         const info = JSON.parse(rendered);
         if (info.rootChildren === 0) {
           console.error('[smoke] FAIL: 页面 JS 未渲染（白屏），资源加载可能失败');
+          writeSmokeMarker('fail', { reason: 'renderer-not-rendered' });
           app.exit(1);
           return;
         }
         console.log('[smoke] PASS');
+        writeSmokeMarker('pass');
         app.exit(0);
       } catch (e) {
         console.error('[smoke] FAIL:', e.message);
+        writeSmokeMarker('fail', { reason: e.message });
         app.exit(1);
       }
     });
     mainWindow.webContents.once('did-fail-load', (_e, code, desc) => {
       console.error(`[smoke] load failed (${code}): ${desc}`);
+      writeSmokeMarker('fail', { reason: `load failed (${code}): ${desc}` });
       app.exit(1);
     });
   }
