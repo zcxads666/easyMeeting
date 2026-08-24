@@ -62,6 +62,25 @@ test('桌面包强制构建并加载离线 Runtime 与媒体工具', async () =>
   assert.match(desktopBuild, /hdiutil/); assert.match(desktopBuild, /verbatimSymlinks/); assert.match(desktopBuild, /MEETING_RUNTIME_VERIFY_ONLY/);
 });
 
+test('离线 Runtime 显式收集 Windows 原生与模型下载依赖并做守护进程自检', async () => {
+  const [buildRuntime, runtime] = await Promise.all([
+    fsp.readFile('scripts/build-runtime.mjs', 'utf8'),
+    fsp.readFile('python/runtime.py', 'utf8')
+  ]);
+  for (const dependency of ['torch', 'transformers', 'modelscope', 'huggingface_hub', 'av', 'onnxruntime', 'soundfile']) {
+    assert.match(buildRuntime, new RegExp(`'${dependency}'`), `Runtime 必须显式收集 ${dependency}`);
+  }
+  assert.match(buildRuntime, /verifyRuntimeDaemon/);
+  assert.match(runtime, /importlib\.import_module/);
+  assert.match(runtime, /"errors": package_errors/);
+});
+
+test('模型代理请求前等待冷启动 Runtime，避免首个 Windows 请求 fetch failed', async () => {
+  const source = await fsp.readFile('server/routes/models.js', 'utf8');
+  assert.match(source, /ensureFreshPython\(\{ wait: true, timeoutMs: 30000 \}\)/);
+  assert.match(source, /RUNTIME_DAEMON_FAILED/);
+});
+
 test('package verifier 接受内置 Runtime/FFmpeg 的完整包并拒绝用户 settings', async () => {
   const temp = await fsp.mkdtemp(path.join(os.tmpdir(), 'meeting-asar-')); const source = path.join(temp, 'source');
   const required = ['electron/main.js', 'electron/preload.cjs', 'server/index.js', 'web/dist/index.html',

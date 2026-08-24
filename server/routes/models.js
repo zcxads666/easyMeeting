@@ -12,7 +12,7 @@ import { inspectModelsWithoutRuntime } from '../services/models/catalog.js';
 const router = Router();
 router.use(json());
 
-async function proxy(path, req, res, { fresh = false } = {}) {
+async function proxy(path, req, res) {
   const doFetch = () => fetch(`${getPythonUrl()}${path}`, {
     method: req.method,
     headers: { 'Content-Type': 'application/json' },
@@ -21,19 +21,21 @@ async function proxy(path, req, res, { fresh = false } = {}) {
     signal: AbortSignal.timeout(15000)
   });
 
-  // 仅列表/状态请求等待代码热重启（fresh=true，有短超时）；
-  // 删除/切换/下载不等待，避免用户操作被重启阻塞
-  if (fresh) {
-    try { await ensureFreshPython(); } catch { /* 忽略，继续尝试请求 */ }
+  // Every Runtime request must wait for a cold-started packaged daemon. On
+  // Windows native Torch DLL imports can outlast the first fetch attempt.
+  const runtimeReady = await ensureFreshPython({ wait: true, timeoutMs: 30000 }).catch(() => false);
+  if (!runtimeReady) {
+    return res.status(502).json({ error: '本地推理服务未启动，请稍后重试', code: 'RUNTIME_DAEMON_FAILED' });
   }
 
   let r;
   try {
     r = await doFetch();
   } catch {
-    // 首次失败：重新拉起服务并重试一次
+    // 服务可能在请求间隙退出：重新拉起并重试一次
     try {
-      await ensureFreshPython();
+      const restarted = await ensureFreshPython({ wait: true, timeoutMs: 30000 });
+      if (!restarted) throw new Error('本地推理服务未启动');
       r = await doFetch();
     } catch (e) {
       return res.status(502).json({ error: `本地推理服务未启动: ${e.message}` });
@@ -60,9 +62,9 @@ router.get('/', async (req, res) => {
     return res.json({ models, disk_usage: models.reduce((sum, model) => sum + (model.sizeBytes || 0), 0), runtimeUnavailable: true });
   }
 });
-router.get('/runtime/capabilities', (req, res) => proxy('/runtime/capabilities', req, res, { fresh: true }));
-router.get('/runtime/health', (req, res) => proxy('/runtime/health', req, res, { fresh: true }));
-router.get('/download/status', (req, res) => proxy('/models/download/status', req, res, { fresh: true }));
+router.get('/runtime/capabilities', (req, res) => proxy('/runtime/capabilities', req, res));
+router.get('/runtime/health', (req, res) => proxy('/runtime/health', req, res));
+router.get('/download/status', (req, res) => proxy('/models/download/status', req, res));
 router.post('/download', async (req, res) => {
   const settings = await getSettings();
   const body = { ...(req.body || {}) };

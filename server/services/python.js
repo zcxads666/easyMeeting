@@ -21,6 +21,7 @@ let intentionalKill = false; // 主动 kill（restartPython/stopPython），exit
 let restartInProgress = false; // restartPython 进行中：期间任何子进程退出都不触发自动重启
 let spawnPromise = null; // spawn 互斥去重锁：并发调用复用同一个进行中的启动流程
 let lastLaunchAt = 0; // 最近一次 spawn 的时间：启动冷却，避免"进程未绑定端口"窗口期重复 spawn
+let lastLaunchError = null;
 
 // 推理服务端口：默认 PYTHON_PORT（8300），被占用时自动递增更换空闲端口
 let pyPort = PYTHON_PORT;
@@ -214,12 +215,19 @@ async function launch() {
       MEETING_MEDIA_DIR: MEDIA_DIR
     }
   });
-  child.stdout.on('data', (d) => process.stdout.write(`[python] ${d}`));
-  child.stderr.on('data', (d) => process.stderr.write(`[python:err] ${d}`));
-  child.on('exit', async (code, signal) => {
+  const launchedChild = child;
+  lastLaunchError = null;
+  launchedChild.stdout.on('data', (d) => process.stdout.write(`[python] ${d}`));
+  launchedChild.stderr.on('data', (d) => process.stderr.write(`[python:err] ${d}`));
+  launchedChild.once('error', (error) => {
+    lastLaunchError = error;
+    logger.error('daemon spawn failed', { errorCode: error.code, message: error.message });
+    console.error(`[python] 推理服务启动失败: ${error.message}`);
+  });
+  launchedChild.on('exit', async (code, signal) => {
     logger.warn('daemon exited', { exitCode: code, signal });
     console.log(`[python] exited with code ${code}`);
-    child = null;
+    if (child === launchedChild) child = null;
     const wasIntentional = intentionalKill;
     intentionalKill = false;
     // 仅"崩溃退出"才自动重启：restartPython 进行中不参与、
@@ -411,7 +419,7 @@ async function restartPython(waitMs = 8000) {
 }
 
 // 模型接口调用前调用：检测推理源码变更自动重启；未就绪时按节流拉起
-export async function ensureFreshPython({ wait = true } = {}) {
+export async function ensureFreshPython({ wait = true, timeoutMs = 30000 } = {}) {
   if (await isHealthy()) {
     // 仅重启本进程管理的子进程（child 存在）；外部/遗留服务不接管，避免端口冲突
     const current = await pythonCodeMtime();
@@ -431,14 +439,22 @@ export async function ensureFreshPython({ wait = true } = {}) {
   }
   if (Date.now() - lastSpawnAttempt > 10000) {
     lastSpawnAttempt = Date.now();
-    spawnPython().catch(() => {});
+    spawnPython().catch((error) => {
+      lastLaunchError = error;
+      logger.warn('runtime startup failed', { errorCode: error.code, message: error.message });
+    });
   }
-  // 短暂等待就绪（最多 ~8s），避免长时间阻塞模型请求
-  const deadline = Date.now() + 8000;
+  // Packaged Runtime first-start can spend several seconds loading native
+  // Torch DLLs. Wait long enough for a cold Windows start instead of turning
+  // that normal startup window into a user-visible "fetch failed".
+  const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     await sleep(500);
     if (await isHealthy()) return true;
   }
+  if (lastLaunchError) logger.warn('runtime did not become healthy', {
+    errorCode: lastLaunchError.code, message: lastLaunchError.message
+  });
   return false;
 }
 

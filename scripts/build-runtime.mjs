@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import { access, copyFile, mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import os from 'node:os';
+import net from 'node:net';
 
 const root = path.resolve(import.meta.dirname, '..');
 const outputRoot = path.join(root, 'release', 'runtime');
@@ -26,6 +27,55 @@ function run(command, args, options = {}) {
     child.once('exit', (code) => code === 0 ? resolve({ stdout, stderr })
       : reject(new Error(`${command} exited ${code}${stderr ? `\n${stderr}` : ''}`)));
   });
+}
+
+function freePort() {
+  return new Promise((resolve, reject) => {
+    const server = net.createServer();
+    server.once('error', reject);
+    server.listen(0, '127.0.0.1', () => {
+      const { port } = server.address();
+      server.close((error) => error ? reject(error) : resolve(port));
+    });
+  });
+}
+
+async function verifyRuntimeDaemon() {
+  const port = await freePort();
+  const modelsDir = path.join(os.tmpdir(), 'meeting-runtime-daemon-models');
+  const env = { ...process.env, MEETING_PY_PORT: String(port), MEETING_MODELS_DIR: modelsDir };
+  delete env.MEETING_RUNTIME_VERIFY_ONLY;
+  const child = spawn(executable, [], {
+    cwd: runtimeDir,
+    stdio: ['ignore', 'pipe', 'pipe'],
+    env
+  });
+  let output = '';
+  const collect = (chunk) => { output = `${output}${chunk}`.slice(-12000); };
+  child.stdout.on('data', collect);
+  child.stderr.on('data', collect);
+  let exited = false;
+  child.once('exit', () => { exited = true; });
+  try {
+    const deadline = Date.now() + 30000;
+    while (Date.now() < deadline && !exited) {
+      try {
+        const response = await fetch(`http://127.0.0.1:${port}/health`, { signal: AbortSignal.timeout(1500) });
+        if (response.ok) return;
+      } catch {
+        // The daemon may still be importing native dependencies.
+      }
+      await new Promise((resolve) => setTimeout(resolve, 250));
+    }
+    throw new Error(`Bundled Runtime daemon did not become healthy${output ? `\n${output}` : ''}`);
+  } finally {
+    if (!exited) child.kill();
+    await new Promise((resolve) => {
+      if (exited) return resolve();
+      const timer = setTimeout(resolve, 5000);
+      child.once('exit', () => { clearTimeout(timer); resolve(); });
+    });
+  }
 }
 
 async function restoreMacTorchBinaries(python) {
@@ -63,15 +113,22 @@ await rm(runtimeDir, { recursive: true, force: true });
 await rm(workDir, { recursive: true, force: true });
 await mkdir(outputRoot, { recursive: true });
 
-const collectAll = ['faster_whisper', 'ctranslate2'];
+// Keep the native and dynamically imported dependencies explicit. PyInstaller's
+// platform hooks do not always discover the Torch/model-download dependency
+// graph equally on Windows and macOS, especially for native DLLs and lazy
+// imports used by ModelScope/Hugging Face. Collect Torch binaries without
+// pulling its unrelated training/example modules into the desktop package.
+const collectAll = ['faster_whisper', 'ctranslate2', 'av', 'onnxruntime'];
+const collectBinaries = ['torch'];
 const collectSubmodules = ['transformers.models.qwen3', 'transformers.models.qwen3_asr'];
 const hiddenImports = ['uvicorn.logging', 'uvicorn.loops.auto', 'uvicorn.protocols.http.auto',
   'uvicorn.protocols.websockets.auto', 'uvicorn.lifespan.on',
-  'modelscope.hub.snapshot_download'];
+  'torch', 'transformers', 'huggingface_hub', 'modelscope', 'modelscope.hub.snapshot_download', 'soundfile'];
 const args = ['-m', 'PyInstaller', '--noconfirm', '--clean', '--onedir', '--name', 'meeting-runtime',
   '--distpath', outputRoot, '--workpath', workDir, '--specpath', workDir, '--paths', path.join(root, 'python'),
   '--contents-directory', '_internal'];
 for (const name of collectAll) args.push('--collect-all', name);
+for (const name of collectBinaries) args.push('--collect-binaries', name);
 for (const name of collectSubmodules) args.push('--collect-submodules', name);
 for (const name of hiddenImports) args.push('--hidden-import', name);
 args.push(path.join(root, 'python', 'main.py'));
@@ -88,6 +145,8 @@ const healthLine = verification.stdout.trim().split(/\r?\n/).findLast((line) => 
 if (!healthLine) throw new Error(`Bundled Runtime verification did not return JSON: ${verification.stdout} ${verification.stderr}`);
 const health = JSON.parse(healthLine);
 if (!health.dependencies?.ok) throw new Error(`Bundled Runtime dependency verification failed: ${healthLine}`);
+if (!health.modelRuntime?.available) throw new Error(`Bundled Runtime model dependency verification failed: ${healthLine}`);
+await verifyRuntimeDaemon();
 
 const packageJson = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
 const executableStat = await stat(executable);
