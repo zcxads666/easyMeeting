@@ -10,6 +10,17 @@ const isMac = process.platform === 'darwin';
 const args = process.argv.slice(2);
 const command = process.execPath;
 const builderCli = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
+const builderArgs = [];
+for (let index = 0; index < args.length; index += 1) {
+  const arg = args[index];
+  if (arg === '--publish' || arg === '-p') {
+    index += 1;
+    continue;
+  }
+  if (arg.startsWith('--publish=')) continue;
+  builderArgs.push(arg);
+}
+
 function builderEnvironment() {
   const env = { ...process.env };
   if (env.CSC_IDENTITY_AUTO_DISCOVERY === 'false') {
@@ -30,9 +41,9 @@ function runBuilder(outputDir) {
     let outputTail = '';
     const child = spawn(command, [
       builderCli,
+      ...builderArgs,
       '--publish',
       'never',
-      ...args,
       `--config.directories.output=${outputDir}`
     ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: builderEnvironment() });
     const forward = (chunk, target) => {
