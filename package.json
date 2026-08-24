@@ -53,6 +53,8 @@
     "appId": "com.meeting.notes",
     "productName": "MeetingNotes",
     "artifactBuildCompleted": "scripts/artifact-build-completed.cjs",
+    "afterPack": "scripts/verify-mac-app.cjs",
+    "electronDist": "node_modules/electron/dist",
     "directories": {
       "output": "release/desktop"
     },
