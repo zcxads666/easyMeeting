@@ -26,8 +26,15 @@ logs/
 # AI 助手配置（本地生效，不入库）
 AGENTS.md
 CLAUDE.md
+.cursor/
+.claude/
 .codex/
 .agents/
+.aider*
+.continue/
+.windsurf/
+.trae/
+.codeium/
 .cursorrules
 
 # 环境与密钥（绝不入库）

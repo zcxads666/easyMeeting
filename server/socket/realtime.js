@@ -1,5 +1,4 @@
 import { getMeeting, saveMeeting, getSettings } from '../services/store/jsonstore.js';
-import { createRealtimeStream as defaultCreateStream } from '../services/asr/index.js';
 import { normalizeRealtimeFinal, normalizeRealtimeMetrics } from '../services/asr/contract.js';
 import { resolveRealtimeCapability } from '../services/asr/capabilities.js';
 import { RecordingWriter, cleanupPartialRecordings } from '../services/audio/recording.js';
@@ -9,7 +8,7 @@ import { MEETING_SCHEMA_VERSION } from '../services/timeline.js';
 const sessions = new Map();
 const logError = (message, error) => console.error(`[realtime] ${message}:`, error?.stack || error?.message || error);
 
-export function setupRealtime(io, createStream = defaultCreateStream) {
+export function setupRealtime(io, injectedCreateStream = null) {
   cleanupPartialRecordings().catch((error) => logError('partial recording cleanup failed', error));
   io.on('connection', (socket) => {
     socket.on('rt:start', async ({ meetingId }) => {
@@ -24,7 +23,10 @@ export function setupRealtime(io, createStream = defaultCreateStream) {
         await saveMeeting(meeting);
         const recording = await RecordingWriter.create(meetingId);
         let stream = null; let streamError = null;
-        try { stream = createStream(settings.asr.provider, settings, capability); }
+        try {
+          const createStream = injectedCreateStream || (await import('../services/asr/index.js')).createRealtimeStream;
+          stream = createStream(settings.asr.provider, settings, capability);
+        }
         catch (error) { streamError = error; }
         const session = {
           stream,

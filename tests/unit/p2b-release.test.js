@@ -6,6 +6,19 @@ import os from 'node:os';
 import { createPackage } from '@electron/asar';
 import { verifyPackage } from '../../scripts/verify-package.mjs';
 import { projectPythonCandidates } from '../../scripts/python-path.mjs';
+import { lazyRouter } from '../../server/services/lazy-router.js';
+
+test('lazyRouter 只在首次请求加载模块并复用 Router', async () => {
+  let loads = 0; let calls = 0;
+  const middleware = lazyRouter(async () => {
+    loads++;
+    return { default: (_req, _res, next) => { calls++; next(); } };
+  });
+  const invoke = () => new Promise((resolve, reject) => middleware({}, {}, (error) => error ? reject(error) : resolve()));
+  assert.equal(loads, 0);
+  await invoke(); await invoke();
+  assert.equal(loads, 1); assert.equal(calls, 2);
+});
 
 test('Models UI 覆盖 lifecycle、真实 progress 和 benchmark 状态', async () => {
   const source = await fsp.readFile('web/src/pages/Models.jsx', 'utf8');

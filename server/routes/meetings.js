@@ -7,17 +7,13 @@ import {
   listMeetings, getMeeting, saveMeeting, deleteMeeting, updateMeeting
 } from '../services/store/jsonstore.js';
 import { isSupported, probe } from '../services/audio/ffmpeg.js';
-import { transcribeFile } from '../services/asr/index.js';
 import { taskManager } from '../services/queue.js';
 import { getSettings } from '../services/store/jsonstore.js';
 import { UPLOADS_DIR } from '../config.js';
 import { mimeFor } from '../services/audio/ffmpeg.js';
 import { resolveMeetingAudio } from '../services/audio/access.js';
-import { runAlignment } from '../services/alignment.js';
 import { buildSrt, buildVtt, SubtitleError } from '../services/subtitles.js';
 import { MEETING_SCHEMA_VERSION } from '../services/timeline.js';
-import { runDiarization, renameSpeakers } from '../services/diarization.js';
-import { enqueuePostProcessing } from '../services/post-processing.js';
 
 const router = Router();
 
@@ -135,7 +131,10 @@ router.post('/:id/align', async (req, res) => {
   const meeting = await getMeeting(req.params.id);
   if (!meeting) return res.status(404).json({ error: '会议不存在', code: 'MEETING_NOT_FOUND' });
   const task = taskManager.create({ type: 'alignment', lane: 'local', metadata: { meetingId: meeting.id },
-    run: (context) => runAlignment(meeting.id, req.body || {}, context) });
+    run: async (context) => {
+      const { runAlignment } = await import('../services/alignment.js');
+      return runAlignment(meeting.id, req.body || {}, context);
+    } });
   return res.status(202).json({ taskId: task.id });
 });
 
@@ -145,7 +144,10 @@ router.post('/:id/diarize', async (req, res) => {
   const settings = await getSettings();
   const options = { ...settings.diarization, ...(req.body || {}) };
   const task = taskManager.create({ type: 'diarization', lane: 'local', metadata: { meetingId: meeting.id },
-    run: (context) => runDiarization(meeting.id, options, context) });
+    run: async (context) => {
+      const { runDiarization } = await import('../services/diarization.js');
+      return runDiarization(meeting.id, options, context);
+    } });
   return res.status(202).json({ taskId: task.id });
 });
 
@@ -153,6 +155,7 @@ router.patch('/:id/speakers', async (req, res) => {
   const meeting = await getMeeting(req.params.id);
   if (!meeting) return res.status(404).json({ error: '会议不存在', code: 'MEETING_NOT_FOUND' });
   try {
+    const { renameSpeakers } = await import('../services/diarization.js');
     meeting.speakerLabels = renameSpeakers(meeting, req.body?.labels);
     return res.json(await saveMeeting(meeting));
   } catch (error) { return res.status(400).json({ error: error.message, code: error.code }); }
@@ -206,6 +209,7 @@ router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
       if (context.isCancellationRequested()) return null;
       context.update('transcribing');
       const duration = Number(info.format?.duration) || null;
+      const { transcribeFile } = await import('../services/asr/index.js');
       const result = await transcribeFile(settings.asr.provider, {
         filePath: req.file.path,
         fileName: req.file.originalname,
@@ -231,6 +235,7 @@ router.post('/:id/transcribe', upload.single('audio'), async (req, res) => {
         status: 'transcribed'
       });
       if (!saved) throw Object.assign(new Error('会议已删除，转写结果未保存'), { code: 'MEETING_DELETED' });
+      const { enqueuePostProcessing } = await import('../services/post-processing.js');
       enqueuePostProcessing(meeting.id, settings);
       return { meetingId: meeting.id, asr: result };
     } catch (err) {

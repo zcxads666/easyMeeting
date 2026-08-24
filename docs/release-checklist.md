@@ -6,7 +6,9 @@
 - [ ] `npm run setup:python && npm run test:python` 全部通过
 - [ ] `npm run build` 通过
 - [ ] Linux xvfb Electron smoke 通过
-- [ ] Windows、macOS、Linux electron-builder 产物成功
+- [ ] Windows、macOS、Linux electron-builder 产物成功且 packaged startup smoke 通过
+- [ ] tag 发布的 Windows 产物已签名，macOS 产物已签名并公证
+- [ ] 检查启动日志的 app-ready、splash-visible、server-listening、renderer-finished-load 阶段耗时
 - [ ] `npm run verify:package` 通过
 - [ ] 产物不含 `.venv`、models、data、settings、logs、credential
 - [ ] Windows/macOS/Linux 安装包人工启动检查

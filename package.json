@@ -16,6 +16,7 @@
     "test": "node --test \"tests/unit/*.test.js\" \"tests/system/*.test.js\"",
     "test:python": "node scripts/python-test.mjs",
     "verify:package": "node scripts/verify-package.mjs",
+    "test:startup": "node scripts/startup-smoke.mjs",
     "dist": "node scripts/build-release.mjs",
     "desktop": "electron .",
     "desktop:dev": "concurrently -k -n web,electron \"npm:dev:web\" \"electron . --dev\"",
@@ -87,7 +88,9 @@
         "dmg",
         "zip"
       ],
-      "category": "public.app-category.productivity"
+      "category": "public.app-category.productivity",
+      "hardenedRuntime": true,
+      "notarize": true
     },
     "win": {
       "target": [

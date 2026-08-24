@@ -10,13 +10,8 @@ import { ensureDirs } from './services/store/jsonstore.js';
 import { taskManager } from './services/queue.js';
 import meetingsRoute from './routes/meetings.js';
 import settingsRoute from './routes/settings.js';
-import modelsRoute from './routes/models.js';
-import llmRoute from './routes/llm.js';
-import tasksRoute from './routes/tasks.js';
-import runtimeRoute from './routes/runtime.js';
-import { createDiagnosticsRoute } from './routes/diagnostics.js';
+import { lazyRouter, lazyRouterFactory } from './services/lazy-router.js';
 import { setupRealtime } from './socket/realtime.js';
-import { spawnPython, getRuntimeHealth } from './services/python.js';
 import { checkFFmpeg } from './services/audio/ffmpeg.js';
 import { createLogger } from './services/logger.js';
 import { issueMediaToken, verifyMediaToken } from './services/audio/media-token.js';
@@ -86,17 +81,21 @@ export function createServer(options = {}) {
 
   app.use('/api/meetings', meetingsRoute);
   app.use('/api/settings', settingsRoute);
-  app.use('/api/models', modelsRoute);
-  app.use('/api/llm', llmRoute);
-  app.use('/api/tasks', tasksRoute);
-  app.use('/api/runtime', runtimeRoute);
+  app.use('/api/models', lazyRouter(() => import('./routes/models.js')));
+  app.use('/api/llm', lazyRouter(() => import('./routes/llm.js')));
+  app.use('/api/tasks', lazyRouter(() => import('./routes/tasks.js')));
+  app.use('/api/runtime', lazyRouter(() => import('./routes/runtime.js')));
   let appVersion = 'unknown';
   try { appVersion = JSON.parse(fs.readFileSync(path.join(ROOT, 'package.json'), 'utf8')).version; } catch { /* optional metadata */ }
-  app.use('/api/diagnostics', createDiagnosticsRoute({ appVersion, authEnabled: Boolean(apiToken) }));
+  app.use('/api/diagnostics', lazyRouterFactory(async () => {
+    const { createDiagnosticsRoute } = await import('./routes/diagnostics.js');
+    return createDiagnosticsRoute({ appVersion, authEnabled: Boolean(apiToken) });
+  }));
 
   const dist = path.join(ROOT, 'web', 'dist');
   app.use(express.static(dist, { index: false }));
   app.get('/api/health', async (_req, res) => {
+    const { getRuntimeHealth } = await import('./services/python.js');
     res.json({
       ffmpeg: await checkFFmpeg(),
       python: await getRuntimeHealth()
@@ -177,10 +176,5 @@ if (isDirectRun) {
   const ffmpegOk = await checkFFmpeg();
   if (!ffmpegOk) console.warn('[meeting] 警告: 未检测到 FFmpeg，文件转写将不可用。请安装 ffmpeg。');
 
-  // 后台拉起 Python 推理服务（不阻塞，失败仅警告）
-  spawnPython().then((ok) => {
-    if (!ok) console.warn('[meeting] Python 推理服务未就绪，本地模型功能不可用。请运行 npm run setup:python');
-  }).catch((e) => {
-    console.warn('[meeting] Python 推理服务启动失败:', e.message);
-  });
+  // Python Runtime 按需启动，不与普通浏览器首屏争抢资源。
 }

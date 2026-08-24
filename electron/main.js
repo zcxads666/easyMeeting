@@ -6,13 +6,26 @@ import { isAllowedRendererNavigation, isSafeExternalUrl } from './security.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.argv.includes('--dev');
+const startupStartedAt = performance.now();
 
 const DEV_URL = 'http://localhost:5173';
 let mainWindow = null;
+let splashWindow = null;
 let serverPort = null;
 let apiToken = '';
 let stopPython = null;
 let electronLogger = null;
+let showFallbackTimer = null;
+
+function markStartup(stage, context = {}) {
+  const elapsedMs = Math.round((performance.now() - startupStartedAt) * 10) / 10;
+  const payload = { stage, elapsedMs, ...context };
+  console.log(`[startup] ${stage} +${elapsedMs}ms`);
+  electronLogger?.info('startup milestone', payload);
+  return payload;
+}
+
+markStartup('process-started', { packaged: !isDev });
 
 // 全局错误兜底：防止主进程未捕获异常导致静默崩溃
 process.on('uncaughtException', (err) => {
@@ -40,6 +53,8 @@ if (!gotLock) {
 
 async function bootstrap() {
   await app.whenReady();
+  markStartup('app-ready');
+  createSplashWindow();
   // 必须在 import server 模块之前设置数据目录环境变量：
   // server 模块顶层会基于 DATA_DIR 创建 multer 存储目录（见 routes/meetings.js），
   // 打包后 app.asar 是只读的，若仍指向 ROOT/data 会在加载时崩溃。
@@ -53,9 +68,9 @@ async function bootstrap() {
 
   // 动态 import：确保上面环境变量设置先于 server 模块加载
   const { createServer } = await import('../server/index.js');
-  const python = await import('../server/services/python.js');
   const { EncryptedFileSecretStore, configureSecretStore } = await import('../server/services/secrets.js');
   const { createLogger } = await import('../server/services/logger.js');
+  markStartup('core-modules-loaded');
   electronLogger = createLogger('electron');
   configureSecretStore(new EncryptedFileSecretStore({
     file: path.join(app.getPath('userData'), 'secrets.json'),
@@ -63,22 +78,53 @@ async function bootstrap() {
     decrypt: (value) => safeStorage.decryptString(value),
     available: () => safeStorage.isEncryptionAvailable()
   }));
-  stopPython = python.stopPython;
-
   // 内嵌会议服务（随机端口，仅监听 127.0.0.1，纯内部通信通道）
   const srv = createServer({ port: 0 });
   serverPort = await srv.start();
   apiToken = srv.apiToken;
+  markStartup('server-listening', { port: serverPort });
   console.log(`[electron] meeting server on 127.0.0.1:${serverPort}`);
   electronLogger.info('desktop core started', { port: serverPort, packaged: !isDev });
 
-  // 生产模式只启动已经安装且验证通过的 Runtime，不执行 pip install。
-  python.spawnPython().catch(() => {});
   createWindow();
 
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) createWindow();
   });
+}
+
+function createSplashWindow() {
+  splashWindow = new BrowserWindow({
+    width: 420,
+    height: 260,
+    resizable: false,
+    frame: false,
+    transparent: false,
+    backgroundColor: '#f5f5f7',
+    show: true,
+    alwaysOnTop: true,
+    skipTaskbar: true,
+    webPreferences: { contextIsolation: true, nodeIntegration: false, sandbox: true }
+  });
+  const html = `<!doctype html><html><head><meta charset="utf-8"><meta http-equiv="Content-Security-Policy" content="default-src 'none'; style-src 'unsafe-inline'">
+    <style>html,body{height:100%;margin:0}body{display:grid;place-items:center;background:#f5f5f7;color:#1d1d1f;font:14px -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.wrap{text-align:center}.logo{width:58px;height:58px;margin:0 auto 20px;border-radius:18px;display:grid;place-items:center;background:#007aff;color:white;font-size:28px;font-weight:650;box-shadow:0 12px 30px #007aff33}.title{font-size:20px;font-weight:650}.status{margin-top:9px;color:#6e6e73}.bar{width:180px;height:3px;margin:22px auto 0;overflow:hidden;border-radius:3px;background:#d2d2d7}.bar:after{content:"";display:block;width:45%;height:100%;border-radius:3px;background:#007aff;animation:load 1.1s ease-in-out infinite}@keyframes load{from{transform:translateX(-110%)}to{transform:translateX(330%)}}</style>
+    </head><body><div class="wrap"><div class="logo">会</div><div class="title">会议纪要</div><div class="status">正在启动本地服务…</div><div class="bar"></div></div></body></html>`;
+  splashWindow.loadURL(`data:text/html;charset=UTF-8,${encodeURIComponent(html)}`);
+  splashWindow.on('closed', () => { splashWindow = null; });
+  markStartup('splash-visible');
+}
+
+function showMainWindow(reason) {
+  if (!mainWindow || mainWindow.isDestroyed() || mainWindow.isVisible()) return;
+  if (showFallbackTimer) { clearTimeout(showFallbackTimer); showFallbackTimer = null; }
+  markStartup('main-window-visible', { reason });
+  mainWindow.show();
+  mainWindow.focus();
+  splashWindow?.close();
+  // 首屏已经可见后再加载清理钩子；这里只导入模块，不启动 Runtime。
+  setImmediate(() => import('../server/services/python.js').then((python) => {
+    stopPython = python.stopPython;
+  }).catch((error) => electronLogger.warn('runtime module preload failed', { message: error.message })));
 }
 
 function createWindow() {
@@ -90,6 +136,7 @@ function createWindow() {
     minHeight: 640,
     title: '会议纪要',
     backgroundColor: '#f5f5f7',
+    show: false,
     webPreferences: {
       preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
@@ -102,6 +149,12 @@ function createWindow() {
       ]
     }
   });
+  markStartup('main-window-created');
+
+  mainWindow.once('ready-to-show', () => showMainWindow('ready-to-show'));
+  showFallbackTimer = setTimeout(() => showMainWindow('startup-timeout'), 15000);
+  mainWindow.webContents.once('dom-ready', () => markStartup('renderer-dom-ready'));
+  mainWindow.webContents.once('did-finish-load', () => markStartup('renderer-finished-load'));
 
   const distRoot = path.join(__dirname, '..', 'web', 'dist');
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
@@ -126,7 +179,10 @@ function createWindow() {
     mainWindow.loadFile(distIndex);
   }
 
-  mainWindow.on('closed', () => { mainWindow = null; });
+  mainWindow.on('closed', () => {
+    if (showFallbackTimer) { clearTimeout(showFallbackTimer); showFallbackTimer = null; }
+    mainWindow = null;
+  });
 
   // 冒烟测试：ELECTRON_SMOKE_TEST=1 时加载完成后自动退出（验证迁移链路）
   if (process.env.ELECTRON_SMOKE_TEST === '1') {

@@ -21,7 +21,6 @@ concurrency:
 env:
   CI: "true"
   MEETING_RUNTIME_AUTO_INSTALL: "0"
-  CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
 jobs:
   quality:
@@ -70,6 +69,12 @@ jobs:
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 60
+    env:
+      CSC_LINK: ${{ matrix.name == 'Windows' && secrets.WINDOWS_CSC_LINK || matrix.name == 'macOS' && secrets.MACOS_CSC_LINK || '' }}
+      CSC_KEY_PASSWORD: ${{ matrix.name == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || matrix.name == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
+      APPLE_ID: ${{ matrix.name == 'macOS' && secrets.APPLE_ID || '' }}
+      APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.name == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
+      APPLE_TEAM_ID: ${{ matrix.name == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
     strategy:
       fail-fast: false
       matrix:
@@ -116,6 +121,13 @@ jobs:
           xvfb-run -a env ELECTRON_SMOKE_TEST=1 ELECTRON_ENABLE_LOGGING=1
           timeout 60s npm run desktop -- --no-sandbox --disable-gpu
 
+      - name: Require signing credentials for tagged releases
+        if: github.ref_type == 'tag' && runner.os != 'Linux'
+        env:
+          HAS_SIGNING_CERT: ${{ (runner.os == 'Windows' && secrets.WINDOWS_CSC_LINK != '') || (runner.os == 'macOS' && secrets.MACOS_CSC_LINK != '') }}
+          HAS_NOTARIZATION: ${{ runner.os != 'macOS' || (secrets.APPLE_ID != '' && secrets.APPLE_APP_SPECIFIC_PASSWORD != '' && secrets.APPLE_TEAM_ID != '') }}
+        run: node -e "if(process.env.HAS_SIGNING_CERT!=='true'||process.env.HAS_NOTARIZATION!=='true') throw new Error('Tagged desktop releases require platform signing and macOS notarization secrets')"
+
       - name: Package Windows
         if: runner.os == 'Windows'
         run: npm run desktop:dist -- --win nsis --publish never
@@ -127,6 +139,18 @@ jobs:
       - name: Package Linux
         if: runner.os == 'Linux'
         run: npm run desktop:dist -- --linux AppImage --publish never
+
+      - name: Packaged startup smoke (Windows)
+        if: runner.os == 'Windows'
+        run: npm run test:startup -- release/desktop
+
+      - name: Packaged startup smoke (macOS)
+        if: runner.os == 'macOS'
+        run: npm run test:startup -- release/desktop
+
+      - name: Packaged startup smoke (Linux)
+        if: runner.os == 'Linux'
+        run: xvfb-run -a npm run test:startup -- release/desktop
 
       - name: Verify package contents
         run: npm run verify:package

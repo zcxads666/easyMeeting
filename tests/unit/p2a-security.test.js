@@ -71,9 +71,12 @@ test('Electron 主窗口保持隔离、sandbox 和窄 preload surface', async ()
     fsp.readFile(path.resolve('electron/main.js'), 'utf8'), fsp.readFile(path.resolve('electron/preload.cjs'), 'utf8'), fsp.readFile(path.resolve('web/index.html'), 'utf8')
   ]);
   assert.match(main, /contextIsolation:\s*true/); assert.match(main, /nodeIntegration:\s*false/); assert.match(main, /sandbox:\s*true/);
+  assert.match(main, /show:\s*false/); assert.match(main, /ready-to-show/); assert.match(main, /createSplashWindow/);
+  assert.doesNotMatch(main, /\.spawnPython\(/, '桌面普通启动不得自动拉起 Python Runtime');
   assert.doesNotMatch(preload, /\brequire\(['"](?:fs|child_process)['"]\)/);
   assert.doesNotMatch(preload, /ipcRenderer|shell|webFrame/);
   assert.match(html, /Content-Security-Policy/); assert.doesNotMatch(html, /script-src[^;]*\*/);
+  assert.doesNotMatch(html, /frame-ancestors/, 'meta CSP 不支持 frame-ancestors');
 });
 
 test('logger redaction 不泄露 credential', () => {

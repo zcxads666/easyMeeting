@@ -113,9 +113,13 @@ npm run build
 ```bash
 npm run desktop:dist
 npm run verify:package
+npm run test:startup -- release/desktop
 ```
 
 产物位于 `release/desktop/`。package verification 会检查 Electron、server、Web build 和 Python 源码存在，并拒绝 `.venv`、模型、用户数据、settings、日志及测试 credential。
+桌面端会先显示轻量启动页，主窗口完成首帧后再切换；启动日志包含各阶段毫秒耗时。正式 tag 发布要求配置
+`WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`、`MACOS_CSC_LINK` / `MACOS_CSC_KEY_PASSWORD`，以及 macOS 公证所需的
+`APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` GitHub Actions secrets；缺失时 tag 构建会失败，避免发布未签名安装包。
 
 ## Model Management and Benchmark
 
