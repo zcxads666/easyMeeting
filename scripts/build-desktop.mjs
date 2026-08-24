@@ -9,6 +9,20 @@ const releaseDir = path.join(root, 'release', 'desktop');
 const isMac = process.platform === 'darwin';
 const args = process.argv.slice(2);
 const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+function builderEnvironment() {
+  const env = { ...process.env };
+  if (env.CSC_IDENTITY_AUTO_DISCOVERY === 'false') {
+    for (const name of [
+      'CSC_LINK',
+      'CSC_KEY_PASSWORD',
+      'WIN_CSC_LINK',
+      'WIN_CSC_KEY_PASSWORD',
+      'CSC_INSTALLER_LINK',
+      'CSC_INSTALLER_KEY_PASSWORD'
+    ]) delete env[name];
+  }
+  return env;
+}
 
 function runBuilder(outputDir) {
   return new Promise((resolve, reject) => {
@@ -19,7 +33,7 @@ function runBuilder(outputDir) {
       'never',
       ...args,
       `--config.directories.output=${outputDir}`
-    ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'] });
+    ], { cwd: root, stdio: ['ignore', 'pipe', 'pipe'], env: builderEnvironment() });
     const forward = (chunk, target) => {
       const text = chunk.toString();
       target.write(text);
