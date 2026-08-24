@@ -8,7 +8,8 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const releaseDir = path.join(root, 'release', 'desktop');
 const isMac = process.platform === 'darwin';
 const args = process.argv.slice(2);
-const command = process.platform === 'win32' ? 'npx.cmd' : 'npx';
+const command = process.execPath;
+const builderCli = path.join(root, 'node_modules', 'electron-builder', 'cli.js');
 function builderEnvironment() {
   const env = { ...process.env };
   if (env.CSC_IDENTITY_AUTO_DISCOVERY === 'false') {
@@ -28,7 +29,7 @@ function runBuilder(outputDir) {
   return new Promise((resolve, reject) => {
     let outputTail = '';
     const child = spawn(command, [
-      'electron-builder',
+      builderCli,
       '--publish',
       'never',
       ...args,
