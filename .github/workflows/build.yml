@@ -72,6 +72,7 @@ jobs:
     env:
       CSC_LINK: ${{ matrix.name == 'Windows' && secrets.WINDOWS_CSC_LINK || matrix.name == 'macOS' && secrets.MACOS_CSC_LINK || '' }}
       CSC_KEY_PASSWORD: ${{ matrix.name == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || matrix.name == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
+      CSC_IDENTITY_AUTO_DISCOVERY: ${{ github.ref_type == 'tag' && 'true' || 'false' }}
       APPLE_ID: ${{ matrix.name == 'macOS' && secrets.APPLE_ID || '' }}
       APPLE_APP_SPECIFIC_PASSWORD: ${{ matrix.name == 'macOS' && secrets.APPLE_APP_SPECIFIC_PASSWORD || '' }}
       APPLE_TEAM_ID: ${{ matrix.name == 'macOS' && secrets.APPLE_TEAM_ID || '' }}
@@ -199,6 +200,7 @@ jobs:
     env:
       CI: "true"
       MEETING_RUNTIME_AUTO_INSTALL: "0"
+      CSC_IDENTITY_AUTO_DISCOVERY: "false"
 
     steps:
       - name: Checkout repository
