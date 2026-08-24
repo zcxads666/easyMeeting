@@ -13,6 +13,8 @@
     "start": "node server/index.js",
     "postinstall": "echo '[meeting] run: npm run setup:python to install Python deps'",
     "setup:python": "node scripts/python-setup.mjs",
+    "setup:runtime-build": "node scripts/python-build-setup.mjs",
+    "build:runtime": "node scripts/build-runtime.mjs",
     "test": "node --test \"tests/unit/*.test.js\" \"tests/system/*.test.js\"",
     "test:python": "node scripts/python-test.mjs",
     "verify:package": "node scripts/verify-package.mjs",
@@ -20,11 +22,13 @@
     "dist": "node scripts/build-release.mjs",
     "desktop": "electron .",
     "desktop:dev": "concurrently -k -n web,electron \"npm:dev:web\" \"electron . --dev\"",
-    "desktop:dist": "electron-builder"
+    "desktop:dist": "npm run build:runtime && electron-builder"
   },
   "dependencies": {
+    "@derhuerst/ffprobe-static": "5.3.0",
     "concurrently": "^9.0.0",
     "express": "^4.19.2",
+    "ffmpeg-static": "5.3.0",
     "multer": "^1.4.5-lts.2",
     "openai": "^4.67.0",
     "react": "^18.3.1",
@@ -48,6 +52,7 @@
   "build": {
     "appId": "com.meeting.notes",
     "productName": "MeetingNotes",
+    "artifactBuildCompleted": "scripts/artifact-build-completed.cjs",
     "directories": {
       "output": "release/desktop"
     },
@@ -68,7 +73,27 @@
       "python/requirements-streaming.txt",
       "README.md",
       "docs/**/*",
-      "package.json"
+      "package.json",
+      "!node_modules/ffmpeg-static/ffmpeg",
+      "!node_modules/ffmpeg-static/ffmpeg.exe",
+      "!node_modules/@derhuerst/ffprobe-static/ffprobe",
+      "!node_modules/@derhuerst/ffprobe-static/ffprobe.exe"
+    ],
+    "extraResources": [
+      {
+        "from": "release/runtime/meeting-runtime",
+        "to": "runtime/meeting-runtime"
+      },
+      {
+        "from": "node_modules/ffmpeg-static",
+        "to": "tools/ffmpeg",
+        "filter": ["ffmpeg", "ffmpeg.exe", "LICENSE"]
+      },
+      {
+        "from": "node_modules/@derhuerst/ffprobe-static",
+        "to": "tools/ffprobe",
+        "filter": ["ffprobe", "ffprobe.exe", "LICENSE"]
+      }
     ],
     "asarUnpack": [
       "python/main.py",
@@ -90,11 +115,20 @@
       ],
       "category": "public.app-category.productivity",
       "hardenedRuntime": true,
-      "notarize": true
+      "notarize": true,
+      "binaries": [
+        "Contents/Resources/runtime/meeting-runtime/meeting-runtime",
+        "Contents/Resources/tools/ffmpeg/ffmpeg",
+        "Contents/Resources/tools/ffprobe/ffprobe"
+      ]
     },
     "win": {
       "target": [
         "nsis"
+      ],
+      "signExts": [
+        ".exe",
+        ".dll"
       ]
     },
     "linux": {
@@ -103,5 +137,9 @@
       ],
       "category": "Office"
     }
+  },
+  "allowScripts": {
+    "ffmpeg-static@5.3.0": true,
+    "@derhuerst/ffprobe-static@5.3.0": true
   }
 }

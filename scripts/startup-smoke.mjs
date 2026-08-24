@@ -28,11 +28,13 @@ function selectExecutable(files) {
 const executable = selectExecutable(await walk(packageDir));
 if (!executable) throw new Error(`[startup-smoke] packaged executable not found under ${packageDir}`);
 
+const smokeProfile = await fsp.mkdtemp(path.join(os.tmpdir(), 'meeting-startup-smoke-'));
 const args = process.platform === 'linux' ? ['--appimage-extract-and-run', '--no-sandbox', '--disable-gpu'] : [];
+args.push(`--user-data-dir=${smokeProfile}`);
 const startedAt = performance.now();
 const child = spawn(executable, args, {
   cwd: root,
-  env: { ...process.env, ELECTRON_SMOKE_TEST: '1', ELECTRON_ENABLE_LOGGING: '1' },
+  env: { ...process.env, ELECTRON_SMOKE_TEST: '1', ELECTRON_ENABLE_LOGGING: '1', MEETING_USER_DATA_DIR: smokeProfile },
   stdio: ['ignore', 'pipe', 'pipe']
 });
 let output = '';
@@ -44,6 +46,7 @@ const exitCode = await new Promise((resolve, reject) => {
   child.once('exit', (code, signal) => resolve(code ?? (signal ? 1 : 0)));
 });
 clearTimeout(timeout);
+await fsp.rm(smokeProfile, { recursive: true, force: true });
 const wallMs = Math.round(performance.now() - startedAt);
 if (exitCode !== 0 || !output.includes('[smoke] PASS')) {
   throw new Error(`[startup-smoke] failed exit=${exitCode} wall=${wallMs}ms`);

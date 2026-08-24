@@ -2,13 +2,24 @@ import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import fsp from 'node:fs/promises';
 import path from 'node:path';
+import { createRequire } from 'node:module';
 import { UPLOADS_DIR } from '../../config.js';
 
 const execFileAsync = promisify(execFile);
+const require = createRequire(import.meta.url);
+
+function resolveTool(envName, packageName, fallback) {
+  if (process.env[envName]) return process.env[envName];
+  try {
+    const value = require(packageName);
+    const candidate = typeof value === 'string' ? value : value?.path;
+    return candidate ? candidate.replace('app.asar', 'app.asar.unpacked') : fallback;
+  } catch { return fallback; }
+}
 
 // 支持环境变量覆盖 ffmpeg/ffprobe 路径（发布时指向内置二进制，如 ffmpeg-static）
-export const FFMPEG_BIN = process.env.FFMPEG_PATH || 'ffmpeg';
-export const FFPROBE_BIN = process.env.FFPROBE_PATH || 'ffprobe';
+export const FFMPEG_BIN = resolveTool('FFMPEG_PATH', 'ffmpeg-static', 'ffmpeg');
+export const FFPROBE_BIN = resolveTool('FFPROBE_PATH', '@derhuerst/ffprobe-static', 'ffprobe');
 
 export const SUPPORTED_EXT = [
   '.mp3', '.wav', '.ogg', '.webm', '.flac', '.aac', '.m4a', '.amr', '.opus', '.mp4', '.mkv', '.mov'

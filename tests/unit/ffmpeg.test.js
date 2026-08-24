@@ -1,6 +1,19 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { isSupported, mimeFor, SUPPORTED_EXT } from '../../server/services/audio/ffmpeg.js';
+import { access } from 'node:fs/promises';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
+import { isSupported, mimeFor, SUPPORTED_EXT, FFMPEG_BIN, FFPROBE_BIN } from '../../server/services/audio/ffmpeg.js';
+
+const execFileAsync = promisify(execFile);
+
+test('离线 FFmpeg 与 FFprobe 二进制可执行', async () => {
+  await access(FFMPEG_BIN); await access(FFPROBE_BIN);
+  const [ffmpeg, ffprobe] = await Promise.all([
+    execFileAsync(FFMPEG_BIN, ['-version']), execFileAsync(FFPROBE_BIN, ['-version'])
+  ]);
+  assert.match(ffmpeg.stdout, /^ffmpeg version/m); assert.match(ffprobe.stdout, /^ffprobe version/m);
+});
 
 test('isSupported 接受多格式', () => {
   for (const ext of ['.mp3', '.wav', '.ogg', '.webm', '.flac', '.aac', '.m4a', '.amr', '.opus', '.mp4', '.mkv', '.mov']) {

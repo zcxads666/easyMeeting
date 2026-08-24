@@ -7,6 +7,8 @@
 - [ ] `npm run build` 通过
 - [ ] Linux xvfb Electron smoke 通过
 - [ ] Windows、macOS、Linux electron-builder 产物成功且 packaged startup smoke 通过
+- [ ] 干净机器未安装 Python/FFmpeg 且断网时，内置 Runtime health 与 FFmpeg/FFprobe 检查通过
+- [ ] `runtime-manifest.json` 的 platform/arch 与安装包一致，包内不含模型权重
 - [ ] tag 发布的 Windows 产物已签名，macOS 产物已签名并公证
 - [ ] 检查启动日志的 app-ready、splash-visible、server-listening、renderer-finished-load 阶段耗时
 - [ ] `npm run verify:package` 通过

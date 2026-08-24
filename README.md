@@ -69,7 +69,7 @@ Speaker Diarization 是可选、本地、离线 post-processing，不参与实�
 
 ## Local Runtime
 
-生产桌面端不会在启动时静默安装 PyTorch。本地 AI Runtime 是可选组件，由用户在模型页面显式安装或修复；Runtime 不可用不影响会议浏览、Cloud ASR 和 Cloud LLM。首次安装包含 PyTorch 等依赖，体积较大并需要稳定网络。详见 [Runtime 文档](docs/runtime.md)。
+官方桌面安装包内置基础 Python Runtime、PyTorch、faster-whisper、Transformers、FFmpeg 和 FFprobe，用户无需另装 Python/pip/FFmpeg；模型权重仍按需下载。Runtime 不会在应用普通启动时拉起，只有使用本地模型功能时才启动。Diarization、日/韩对齐依赖和 Linux CUDA vLLM 不进入标准包，后续由增强版安装包提供。详见 [Runtime 文档](docs/runtime.md)。
 
 支持并测试 Python 3.12；开发目标范围为 Python 3.10–3.12。该范围与当前 CI、Transformers 5.x、PyTorch 和 faster-whisper 依赖组合保持保守一致。
 
@@ -116,7 +116,7 @@ npm run verify:package
 npm run test:startup -- release/desktop
 ```
 
-产物位于 `release/desktop/`。package verification 会检查 Electron、server、Web build 和 Python 源码存在，并拒绝 `.venv`、模型、用户数据、settings、日志及测试 credential。
+`npm run desktop:dist` 会先运行 `npm run build:runtime`，因此构建机需先执行 `npm run setup:runtime-build`。产物位于 `release/desktop/`。package verification 会检查 Electron、server、Web build、离线 Runtime、FFmpeg/FFprobe 和对应许可证存在，并拒绝 `.venv`、模型、用户数据、settings、日志及测试 credential。
 桌面端会先显示轻量启动页，主窗口完成首帧后再切换；启动日志包含各阶段毫秒耗时。正式 tag 发布要求配置
 `WINDOWS_CSC_LINK` / `WINDOWS_CSC_KEY_PASSWORD`、`MACOS_CSC_LINK` / `MACOS_CSC_KEY_PASSWORD`，以及 macOS 公证所需的
 `APPLE_ID` / `APPLE_APP_SPECIFIC_PASSWORD` / `APPLE_TEAM_ID` GitHub Actions secrets；缺失时 tag 构建会失败，避免发布未签名安装包。

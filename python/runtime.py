@@ -1,6 +1,8 @@
 """Local inference runtime capability and device selection."""
+import importlib
 import importlib.metadata
 import importlib.util
+import os
 import platform
 import shutil
 import sys
@@ -55,7 +57,9 @@ def dtype_name(dtype):
 
 def _version(distribution):
     try: return importlib.metadata.version(distribution)
-    except importlib.metadata.PackageNotFoundError: return None
+    except importlib.metadata.PackageNotFoundError:
+        try: return getattr(importlib.import_module(distribution.replace('-', '_')), "__version__", None)
+        except ImportError: return None
 
 def _available(module):
     try: return importlib.util.find_spec(module) is not None
@@ -97,9 +101,11 @@ def health():
             model_runtime = True
         except Exception as exc:
             runtime_error = f"{type(exc).__name__}: {exc}"
+    configured_ffmpeg = os.environ.get("FFMPEG_PATH")
+    ffmpeg = configured_ffmpeg if configured_ffmpeg and os.path.isfile(configured_ffmpeg) else shutil.which("ffmpeg")
     return {
         "daemon": True, "dependencies": {"ok": all(packages.values()), "packages": packages},
-        "ffmpeg": {"available": shutil.which("ffmpeg") is not None, "path": shutil.which("ffmpeg")},
+        "ffmpeg": {"available": ffmpeg is not None, "path": ffmpeg},
         "modelRuntime": {"available": model_runtime, "backend": "transformers",
                          "version": _version("transformers"), "error": runtime_error},
         "pythonExecutable": sys.executable,

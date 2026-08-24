@@ -68,7 +68,7 @@ jobs:
     needs: quality
     if: github.event_name != 'pull_request'
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 60
+    timeout-minutes: 120
     env:
       CSC_LINK: ${{ matrix.name == 'Windows' && secrets.WINDOWS_CSC_LINK || matrix.name == 'macOS' && secrets.MACOS_CSC_LINK || '' }}
       CSC_KEY_PASSWORD: ${{ matrix.name == 'Windows' && secrets.WINDOWS_CSC_KEY_PASSWORD || matrix.name == 'macOS' && secrets.MACOS_CSC_KEY_PASSWORD || '' }}
@@ -99,8 +99,20 @@ jobs:
           node-version: 22
           cache: npm
 
+      - name: Setup Python
+        uses: actions/setup-python@v6
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            python/requirements.txt
+            python/requirements-build.txt
+
       - name: Install dependencies
         run: npm ci
+
+      - name: Build offline Python Runtime prerequisites
+        run: npm run setup:runtime-build
 
       - name: Build web renderer
         run: npm run build

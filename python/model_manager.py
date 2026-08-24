@@ -212,7 +212,7 @@ def download(model_id, destination=None, cancel_event=None, token=None):
     ensure_dir(); destination = Path(destination or download_dir(model_id)); destination.mkdir(parents=True, exist_ok=True)
     item = CATALOG_BY_ID[model_id]; repository = _repository(model_id)
     if item["source"] == "modelscope":
-        try: from modelscope import snapshot_download
+        try: from modelscope.hub.snapshot_download import snapshot_download
         except ImportError as exc: raise RuntimeError("缺少依赖 modelscope") from exc
         snapshot_download(repository, local_dir=str(destination))
     else:

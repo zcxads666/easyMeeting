@@ -2,7 +2,9 @@
 
 桌面 App、AI Runtime、模型文件、会议数据和日志使用独立目录。打包应用不会写 `app.asar` 或 Program Files。
 
-生产桌面启动只检测已有 Runtime，不自动创建 venv 或执行 pip。用户在模型页发起安装后，Runtime task 依次创建环境、升级 pip、安装依赖、验证 imports、启动 daemon 并调用 health endpoint。取消 pip 会把 Runtime 标记为不完整，后续可修复。
+官方桌面安装包内置按平台原生构建的基础 Runtime（PyTorch、Transformers、faster-whisper 等）以及 FFmpeg/FFprobe，普通用户不需要安装 Python、pip 或 FFmpeg。Runtime 以 PyInstaller onedir 形式位于应用 resources 目录，模型权重仍保存在用户数据目录并按需下载。开发模式继续使用项目 venv。
+
+标准离线 Runtime 是签名安装包中的只读组件，不能用 pip 原地修改。日语/韩语对齐、Speaker Diarization 和 Linux CUDA vLLM 等可选能力应由后续增强版安装包提供；标准版请求安装这些能力时会返回 `RUNTIME_BUNDLED_FEATURE_UNAVAILABLE`，不会写 Program Files 或 App bundle。
 
 开发环境：
 
@@ -21,5 +23,7 @@ npm run test:python
 - `qwen-streaming-vllm` installs `qwen-asr[vllm]` explicitly. Capability detection currently requires Linux and CUDA; unsupported systems remain on chunked near-realtime.
 
 Optional feature installation is user initiated and stage-based. Cancellation can leave an incomplete environment, which is reported as broken and can be repaired. No optional package or model is downloaded by ordinary CI.
+
+上述可选安装流程仅适用于源码开发版或未携带离线 Runtime 的兼容构建；官方标准离线包不会修改内置 Runtime。
 
 ASR, aligner and diarization caches are isolated. Local TaskManager concurrency remains one; model deletion is rejected while the per-model operation lock or true-streaming session retains it. Allocation failures return `MODEL_OUT_OF_MEMORY` and never trigger a silent device fallback.

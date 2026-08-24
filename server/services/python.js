@@ -50,6 +50,12 @@ const VENV_DIR = process.env.MEETING_VENV_DIR
 const VENV_PYTHON = os.platform() === 'win32'
   ? path.join(VENV_DIR, 'Scripts', 'python.exe')
   : path.join(VENV_DIR, 'bin', 'python');
+const BUNDLED_RUNTIME_DIR = process.env.MEETING_BUNDLED_RUNTIME_DIR
+  ? path.resolve(process.env.MEETING_BUNDLED_RUNTIME_DIR)
+  : null;
+const BUNDLED_RUNTIME_EXECUTABLE = BUNDLED_RUNTIME_DIR
+  ? path.join(BUNDLED_RUNTIME_DIR, os.platform() === 'win32' ? 'meeting-runtime.exe' : 'meeting-runtime')
+  : null;
 
 // 依赖完整性检查（覆盖推理与模型下载所需核心包）
 const CORE_IMPORTS = ['fastapi', 'uvicorn', 'numpy', 'faster_whisper', 'transformers', 'modelscope', 'torch'];
@@ -101,6 +107,11 @@ const OPTIONAL_FEATURES = {
 export async function installRuntimeFeature(feature, { signal, onStage } = {}) {
   const definition = OPTIONAL_FEATURES[feature];
   if (!definition) throw Object.assign(new Error(`未知 Runtime feature: ${feature}`), { code: 'RUNTIME_FEATURE_UNKNOWN' });
+  if (BUNDLED_RUNTIME_EXECUTABLE && await exists(BUNDLED_RUNTIME_EXECUTABLE)) {
+    throw Object.assign(new Error('标准离线 Runtime 为只读组件；可选能力需使用对应增强版安装包'), {
+      code: 'RUNTIME_BUNDLED_FEATURE_UNAVAILABLE', feature
+    });
+  }
   if (!(await exists(VENV_PYTHON))) throw Object.assign(new Error('请先安装基础 AI Runtime'), { code: 'RUNTIME_NOT_INSTALLED' });
   onStage?.('installing_optional_feature');
   const args = definition.requirements ? ['-r', path.join(PY_DIR, definition.requirements)] : definition.packages;
@@ -173,20 +184,27 @@ function waitChildExit(target, timeoutMs = 3000) {
 }
 
 async function launch() {
-  let pythonBin;
-  try {
-    pythonBin = await ensureVenv({ allowInstall: AUTO_INSTALL });
-  } catch (e) {
-    logger.warn('runtime preparation failed', { errorCode: e.code, message: e.message });
-    console.error('[python] 环境准备失败:', e.message);
-    console.error('[python] 请手动运行: npm run setup:python');
-    return;
+  const bundled = BUNDLED_RUNTIME_EXECUTABLE && await exists(BUNDLED_RUNTIME_EXECUTABLE);
+  let command; let args;
+  if (bundled) {
+    command = BUNDLED_RUNTIME_EXECUTABLE;
+    args = [];
+    startedAtMtime = 0;
+  } else {
+    try {
+      command = await ensureVenv({ allowInstall: AUTO_INSTALL });
+    } catch (e) {
+      logger.warn('runtime preparation failed', { errorCode: e.code, message: e.message });
+      console.error('[python] 环境准备失败:', e.message);
+      console.error('[python] 请手动运行: npm run setup:python');
+      return;
+    }
+    if (!command) return;
+    args = ['-u', path.join(PY_DIR, 'main.py')];
+    startedAtMtime = await pythonCodeMtime();
   }
-  if (!pythonBin) return;
-
-  const pyMain = path.join(PY_DIR, 'main.py');
-  startedAtMtime = await pythonCodeMtime();
-  child = spawn(pythonBin, ['-u', pyMain], {
+  logger.info('launching runtime', { bundled: Boolean(bundled), executable: path.basename(command) });
+  child = spawn(command, args, {
     stdio: ['ignore', 'pipe', 'pipe'],
     env: { ...process.env, MEETING_PY_PORT: String(pyPort), MEETING_DATA_DIR: DATA_DIR }
   });
@@ -269,6 +287,13 @@ export async function spawnPython() {
 }
 
 export async function inspectRuntime() {
+  if (BUNDLED_RUNTIME_EXECUTABLE && await exists(BUNDLED_RUNTIME_EXECUTABLE)) {
+    let manifest = null;
+    try { manifest = JSON.parse(await readFile(path.join(BUNDLED_RUNTIME_DIR, 'runtime-manifest.json'), 'utf8')); }
+    catch { /* manifest is verified during packaging; tolerate old offline bundles */ }
+    return { status: await isHealthy() ? 'running' : 'ready', python: manifest?.buildPython || 'bundled',
+      runtimePath: BUNDLED_RUNTIME_DIR, bundled: true, manifest, error: null };
+  }
   if (!(await exists(VENV_PYTHON))) return { status: 'not_installed', runtimePath: VENV_DIR, error: null };
   try {
     const { stdout } = await execFileAsync(VENV_PYTHON, ['-c', `import ${CORE_IMPORTS.join(',')}; import sys; print(sys.version.split()[0])`]);
@@ -279,6 +304,10 @@ export async function inspectRuntime() {
 }
 
 export async function installRuntime({ signal, onStage } = {}) {
+  if (BUNDLED_RUNTIME_EXECUTABLE && await exists(BUNDLED_RUNTIME_EXECUTABLE)) {
+    onStage?.('verifying');
+    return inspectRuntime();
+  }
   onStage?.('preparing');
   await ensureVenv({ allowInstall: true, signal, onStage });
   onStage?.('verifying');
@@ -288,7 +317,8 @@ export async function installRuntime({ signal, onStage } = {}) {
 }
 
 export async function restartRuntime() { return restartPython(15000); }
-export function runtimePaths() { return { runtimePath: VENV_DIR, sourcePath: PY_DIR }; }
+export function runtimePaths() { return { runtimePath: BUNDLED_RUNTIME_DIR || VENV_DIR, sourcePath: PY_DIR,
+  bundledExecutable: BUNDLED_RUNTIME_EXECUTABLE }; }
 
 export function stopPython() {
   intentionalKill = true;

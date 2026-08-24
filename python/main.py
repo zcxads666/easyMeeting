@@ -291,6 +291,9 @@ def transcribe(req: TranscribeReq):
 
 
 if __name__ == "__main__":
+    if os.environ.get("MEETING_RUNTIME_VERIFY_ONLY") == "1":
+        print(json.dumps({**runtime.health(), "capabilities": runtime.capabilities()}, ensure_ascii=False))
+        raise SystemExit(0)
     import uvicorn
     # 端口由 Node 侧动态分配（被占用时自动更换），默认 8300
     port = int(os.environ.get("MEETING_PY_PORT", "8300"))

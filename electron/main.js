@@ -8,6 +8,10 @@ const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const isDev = process.argv.includes('--dev');
 const startupStartedAt = performance.now();
 
+if (process.env.MEETING_USER_DATA_DIR) {
+  app.setPath('userData', path.resolve(process.env.MEETING_USER_DATA_DIR));
+}
+
 const DEV_URL = 'http://localhost:5173';
 let mainWindow = null;
 let splashWindow = null;
@@ -64,6 +68,10 @@ async function bootstrap() {
     process.env.MEETING_DATA_DIR ||= path.join(app.getPath('userData'), 'data');
     process.env.MEETING_LOG_DIR ||= path.join(app.getPath('userData'), 'logs');
     process.env.MEETING_RUNTIME_AUTO_INSTALL = '0';
+    const executableSuffix = process.platform === 'win32' ? '.exe' : '';
+    process.env.MEETING_BUNDLED_RUNTIME_DIR ||= path.join(process.resourcesPath, 'runtime', 'meeting-runtime');
+    process.env.FFMPEG_PATH ||= path.join(process.resourcesPath, 'tools', 'ffmpeg', `ffmpeg${executableSuffix}`);
+    process.env.FFPROBE_PATH ||= path.join(process.resourcesPath, 'tools', 'ffprobe', `ffprobe${executableSuffix}`);
   }
 
   // 动态 import：确保上面环境变量设置先于 server 模块加载
